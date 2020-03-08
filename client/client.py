@@ -6,11 +6,11 @@ import time
 import datetime
 import threading
 import signal
-import os
 from protocol import *
-from paquets import *
-from estats import *
-from client_object import Client
+from packages import *
+from states import *
+from classes import Client
+
 
 # Creem una instancia de la classe Client
 # que ens ajudarà a gestionar variables com el estat
@@ -60,105 +60,91 @@ def get_actual_date():
     info += str(date.hour) + ":" + str(date.minute) + ":" + str(date.second)
     return info
 
-# -------------------------------------------------------------- #
-# --------------------- FASE DE REGISTRE ----------------------- #
-# -------------------------------------------------------------- #
-
-
-def send_info(sock, server_address, server_response):
-    global client
-    timeout = t * 2
-    # Emmagatzemem les dades d'identificacio
-    # del servidor
-    client.set_server_credentials(
-        server_response[1], server_response[2], server_address[0])
-    data = build_info_data(client.local_tcp, client.elems)
-    address = (client.server_ip, client.udp_port)
-    # Enviem les dades
-    sendto(sock, address, REG_INFO, client.id, client.rand_num, data)
-    client.current_state = WAIT_ACK_INFO
-    (inputs, _, _) = select.select([sock], [], [], timeout)
-    # Comprovem que ens hagi arribat resposta del servidor
-    if len(inputs) > 0:
-        response, server_addr = recvfrom(sock)
-        pck = response[0]
-        if client.has_state(WAIT_ACK_INFO) and client.check_server_credentials(server_id=response[1],
-                                                                               rand_num=response[2],
-                                                                               server_ip=server_addr[0]):
-            if pck == INFO_ACK:
-                return INFO_ACK, response[3]
-            elif pck == INFO_NACK:
-                return INFO_NACK, -1
-    return -1, -1
-
-
-def send_pdus(sock, server_udp_address):
-    global client
-    num_sends = 0
-    timeout = t
-    while True:
-        if num_sends >= n:
-            time.sleep(u)
-            register(sock, server_udp_address)
-            break
-        if num_sends >= p and timeout < q * t:
-            timeout += t
-        # Enviem la pdu REG al servidor
-        sendto(sock, server_udp_address, REG_REQ, client.id, "00000000\0", "")
-        client.current_state = WAIT_ACK_REG
-        (inputs, _, _) = select.select([sock], [], [], timeout)
-        num_sends += 1
-        # Comprovem si hem rebut resposta el servidor
-        if len(inputs) > 0:
-            # Rebem les dades del servidor
-            response, server_addr = recvfrom(sock)
-            if not client.has_state(WAIT_ACK_REG) or not server_addr[0] == server_udp_address[0]:
-                client.current_state = NOT_REGISTERED
-            else:
-                pck = response[0]
-                if pck == REG_ACK:
-                    # ---------- ENVIEM PAQUET INFO I ANALITZEM LA RESPOSTA -------------#
-                    client.set_udp_communication_port(int(response[3]))
-                    info_response = send_info(sock, server_udp_address,
-                                              response)
-                    pck_info = info_response[0]
-                    if pck_info == INFO_ACK:
-                        client.set_tcp_communication_port(
-                            int(info_response[1]))
-                        client.current_state = REGISTERED
-                    elif pck_info == INFO_NACK:
-                        client.current_state = NOT_REGISTERED
-                        continue
-                    else:
-                        client.current_state = NOT_REGISTERED
-                    # ------------- FI ENVIAMENT PAQUET INFO -------------- #
-                elif pck == REG_NACK:
-                    client.current_state = NOT_REGISTERED
-                    continue
-                else:
-                    client.current_state = NOT_REGISTERED
-        if client.has_state(REGISTERED):
-            break
-        if client.has_state(NOT_REGISTERED):
-            register(sock, server_udp_address)
-            break
+# --------------------------------------------------------------
+# --------------------- FASE DE REGISTRE -----------------------
+# --------------------------------------------------------------
 
 
 def register(sock, server_address):
     global client
-    client.num_registration_attemps += 1
-    if client.num_registration_attemps > o:
+    client.register_attemps += 1
+    if client.register_attemps > o:
         print("No s'ha pogut contactar amb el servidor")
         client.current_state = DISCONNECTED
     else:
-        # Comencem el procés de registre
-        send_pdus(sock, server_address)
+        send_reg_req(sock, server_address, 0, t)
 
 
-# -------------------------------------------------------------- #
-# --------------------- FASE DE COMUNICACIÓ -------------------- #
-# ---------------------------PERIÒDICA-------------------------- #
-# -------------------------------------------------------------- #
+def send_reg_req(sock, server_address, num_sends, timeout):
+    global client
+    if num_sends >= n:
+        time.sleep(u)
+        register(sock, server_address)
+    elif not client.has_state(REGISTERED):
+        if num_sends >= p and timeout < q * t:
+            timeout += t
+        sendto(sock, server_address, REG_REQ,
+               client.id, "00000000\0", "")
+        client.current_state = WAIT_ACK_REG
+        (inputs, _, _) = select.select([sock], [], [], timeout)
+        if len(inputs) > 0:
+            response, addr = recvfrom(sock)
+            if client.has_state(WAIT_ACK_REG) and addr[0] == server_address[0]:
+                pck = response[0]
+                if pck == REG_ACK:
+                    client.set_udp_communication_port(int(response[3]))
+                    client.set_server_credentials(
+                        response[1], response[2], addr[0])
+                    send_info(sock, server_address, num_sends, timeout)
+                elif pck == REG_NACK:
+                    client.current_state = NOT_REGISTERED
+                    send_reg_req(sock, server_address, num_sends + 1, timeout)
+                else:
+                    client.current_state = NOT_REGISTERED
+                    register(sock, server_address)
+            else:
+                client.current_state = NOT_REGISTERED
+                register(sock, server_address)
+        else:
+            send_reg_req(sock, server_address, num_sends + 1, timeout)
+
+
+def send_info(sock, server_address, num_reg_sends, reg_timeout):
+    global client
+    info_timeout = t * 2
+    data = build_info_data(client.local_tcp, client.elems)
+    address = (client.server_ip, client.udp_port)
+    sendto(sock, address, REG_INFO, client.id, client.rand_num, data)
+    client.current_state = WAIT_ACK_INFO
+    (inputs, _, _) = select.select([sock], [], [], info_timeout)
+    if len(inputs) > 0:
+        response, addr = recvfrom(sock)
+        pck = response[0]
+        if client.has_state(WAIT_ACK_INFO) and client.check_server_credentials(server_id=response[1],
+                                                                               rand_num=response[2],
+                                                                               server_ip=addr[0]):
+            if pck == INFO_ACK:
+                client.set_tcp_communication_port(int(response[3]))
+                client.current_state = REGISTERED
+            elif pck == INFO_NACK:
+                client.current_state = NOT_REGISTERED
+                send_reg_req(sock, server_address,
+                             num_reg_sends + 1, reg_timeout)
+            else:
+                client.current_state = NOT_REGISTERED
+                register(sock, server_address)
+        else:
+            client.current_state = NOT_REGISTERED
+            register(sock, server_address)
+    else:
+        client.current_state = NOT_REGISTERED
+        register(sock, server_address)
+
+
+# --------------------------------------------------------------
+# --------------------- FASE DE COMUNICACIÓ --------------------
+# ---------------------------PERIÒDICA--------------------------
+# --------------------------------------------------------------
 
 
 def recv_first_alive(sock):
@@ -212,9 +198,41 @@ def send_alive(sock, server_udp_address):
         time.sleep(timeout)
 
 
-# -------------------------------------------------------------- #
-# --------------------- REBUDA DE COMANDES --------------------- #
-# -------------------------------------------------------------- #
+# --------------------------------------------------------------
+# --------------------- REBUDA DE COMANDES ---------------------
+# --------------------------------------------------------------
+def start_cli():
+    global client
+    print("\nBenvingut, introdueix 'help' per veure les comandes acceptades.")
+    while client.has_state(SEND_ALIVE):
+        try:
+            cmd = input().strip().split()
+            if len(cmd) == 0:
+                pass
+            elif cmd[0] == 'help':
+                help()
+            elif cmd[0] == 'stat':
+                run_stat()
+            elif cmd[0] == 'set':
+                run_set(cmd)
+            elif cmd[0] == 'send':
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.connect((client.server_ip, client.tcp_port))
+                    run_send(sock, cmd)
+                    sock.close()
+                except ConnectionError as err:
+                    print(
+                        f"Connexió rebutjada, pot ser que el servidor estigui desconnectat.")
+                    pass
+            elif cmd[0] == 'quit':
+                client.current_state = DISCONNECTED
+            else:
+                print("\tComanda no acceptada.")
+        except EOFError:
+            os.kill(os.getpid(), signal.SIGINT)
+
+
 def help():
     print("\tstat")
     print("\tset <identificador_element> <nou_valor>")
@@ -266,56 +284,9 @@ def run_send(sock, cmd):
                 client.current_state = NOT_REGISTERED
 
 
-def start_cli():
-    global client
-    print("\nBenvingut, introdueix 'help' per veure les comandes acceptades.")
-    while client.has_state(SEND_ALIVE):
-        try:
-            cmd = input().strip().split()
-            if len(cmd) == 0:
-                pass
-            elif cmd[0] == 'help':
-                help()
-            elif cmd[0] == 'stat':
-                run_stat()
-            elif cmd[0] == 'set':
-                run_set(cmd)
-            elif cmd[0] == 'send':
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((client.server_ip, client.tcp_port))
-                run_send(sock, cmd)
-                sock.close()
-            elif cmd[0] == 'quit':
-                client.current_state = DISCONNECTED
-            else:
-                print("\tComanda no acceptada.")
-        except EOFError:
-            os.kill(os.getpid(), signal.SIGINT)
-
-
 # --------------------------------------------------------------
 # --------------------- ESPERA DE CONNEXIONS--------------------
 # --------------------------------------------------------------
-def set_data(sock, elem, value):
-    global client
-    if elem[-1] != 'I':
-        send(sock, DATA_NACK, client.id, client.rand_num,
-             elem, "", "Tipus de l'element incorrecte")
-    else:
-        client.elems[elem] = value
-        print(
-            f"=> Valor {value} assignat a l'element {elem} per el servidor")
-        send(sock, DATA_ACK, client.id,
-             client.rand_num, elem, value, client.id)
-
-
-def get_data(sock, elem):
-    print(
-        f"=> Dades de l'element {elem} demanades per el servidor.")
-    value = client.elems[elem]
-    send(sock, DATA_ACK, client.id,
-         client.rand_num, elem, value, client.id)
-
 
 def wait_server_connections(sock):
     while client.has_state(SEND_ALIVE):
@@ -339,6 +310,27 @@ def wait_server_connections(sock):
                 client.current_state = NOT_REGISTERED
             new_sock.close()
     sock.close()
+
+
+def set_data(sock, elem, value):
+    global client
+    if elem[-1] != 'I':
+        send(sock, DATA_NACK, client.id, client.rand_num,
+             elem, "", "Tipus de l'element incorrecte")
+    else:
+        client.elems[elem] = value
+        print(
+            f"=> Valor {value} assignat a l'element {elem} per el servidor")
+        send(sock, DATA_ACK, client.id,
+             client.rand_num, elem, value, client.id)
+
+
+def get_data(sock, elem):
+    print(
+        f"=> Dades de l'element {elem} demanades per el servidor.")
+    value = client.elems[elem]
+    send(sock, DATA_ACK, client.id,
+         client.rand_num, elem, value, client.id)
 
 
 # ----------------------------------------------------------------
@@ -405,10 +397,6 @@ if __name__ == '__main__':
                     run_connections(tcp_sock)
     except OSError as err:
         print(f"OSError: {err}")
-    except struct.error as err:
-        print(f"Struct Error: {err}")
-    except Exception as err:
-        print(f"{err}")
     finally:
         # Realitzem un exit el qual tanca tots els
         # descriptors de fitxers relacionats amb el procés

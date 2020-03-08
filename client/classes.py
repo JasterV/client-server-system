@@ -1,18 +1,20 @@
-import estats as stat
+from states import NOT_REGISTERED
 import socket
 import sys
 import os
 
 class Client():
+    """Representa l'estat d'un client amb la seva configuració
+    """
     def __init__(self, configfile):
-        config = read(configfile)
+        config = read_cfg(configfile)
         self.id = config['Id']
         self.elems = config['Params']
         self.local_tcp = config['Local-TCP']
         self.server = config['Server']
         self.server_udp = config['Server-UDP']
-        self.current_state = stat.NOT_REGISTERED
-        self.num_registration_attemps = 0
+        self.current_state = NOT_REGISTERED
+        self.register_attemps = 0
         super().__init__()
 
     def has_state(self, *states):
@@ -48,9 +50,9 @@ class Client():
         return ('', port)
 
 
-def read(filename):
+def read_cfg(filename):
         """Llegeix el fitxer de configuració del client
-        i retorna un diccionari <String, dynamic> amb les dades llegides 
+        i retorna un diccionari <String, dynamic> amb les dades llegides
         """
         try:
             cfg = open(filename)
@@ -69,5 +71,5 @@ def read(filename):
             return config
         except FileNotFoundError:
             print(
-                "Error llegint el fitxer de configuració del client, potser no existeix")
+                f"No s'ha trobat el fitxer {filename}")
             sys.exit()
