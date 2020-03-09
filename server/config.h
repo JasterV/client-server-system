@@ -13,12 +13,12 @@ typedef struct config
 char *trim(char *str)
 {
     char *end;
-    //left trim
+    /*left trim*/
     while (isspace((unsigned char)*str))
         str++;
-    if (*str == 0) //Es tot espais
+    if (*str == 0) /*Es tot espais*/
         return str;
-    //Right trim
+    /*Right trim*/
     end = str + strlen(str) - 1;
     while (end > str && (isspace((unsigned char)*end) || (unsigned char)*end == '\n'))
         end--;
@@ -33,11 +33,30 @@ char *getInfo(char *line)
     return info;
 }
 
+char *getLine(FILE *fp)
+{
+    size_t len = 3;
+    char *line = (char *)malloc(len * sizeof(char));
+    int c = fgetc(fp);
+    int i = 0;
+    while (c != '\n' && c != EOF)
+    {
+        line[i] = c;
+        i++;
+        if (i == len)
+        {
+            len++;
+            line = (char *)realloc(line, len * sizeof(char));
+        }
+        c = fgetc(fp);
+    }
+    line[i] = '\0';
+    return line;
+}
+
 char *getInfoFromLine(FILE *fp)
 {
-    char *line = NULL;
-    size_t len = 0;
-    getline(&line, &len, fp);
+    char *line = getLine(fp);
     char *info = getInfo(line);
     info = trim(info);
     return info;
