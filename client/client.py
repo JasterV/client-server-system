@@ -1,3 +1,5 @@
+#!/usr/bin/env python3.6
+
 import socket
 import sys
 import struct
@@ -10,12 +12,27 @@ from protocol import *
 from packages import *
 from states import *
 from classes import Client
+from logger import Logger
 
+# Creem una instancia de la classe logger
+# que ens permetrà printar missatges de debug
+logger = Logger()
+cfgname = "client.cfg"
+# Analitzem els arguments
+# introduits per el script
+if len(sys.argv) > 1:
+    option = sys.argv[1]
+    if option == '-c':
+        if len(sys.argv) != 3:
+            print(f"{sys.argv[0]} {sys.argv[1]} <filename>")
+        cfgname = sys.argv[2]
+    elif option == '-d':
+        logger.turn_debug_on()
 
 # Creem una instancia de la classe Client
 # que ens ajudarà a gestionar variables com el estat
 # del client i la seva configuració
-client = Client('client.cfg')
+client = Client(cfgname)
 
 
 def unpack_response(fmt, response):
@@ -187,6 +204,8 @@ def recv_alive(sock):
         else:
             alives_not_received += 1
         if alives_not_received >= max_lost_alive:
+            logger.debug_print(
+                f"No s'han rebut {max_lost_alive} paquets ALIVE consecutius, estat actual: NOT_REGISTERED")
             client.current_state = NOT_REGISTERED
 
 
@@ -206,7 +225,7 @@ def start_cli():
     print("\nBenvingut, introdueix 'help' per veure les comandes acceptades.")
     while client.has_state(SEND_ALIVE):
         try:
-            cmd = input().strip().split()
+            cmd = input(">> ").strip().split()
             if len(cmd) == 0:
                 pass
             elif cmd[0] == 'help':
@@ -275,9 +294,10 @@ def run_send(sock, cmd):
             client_id = response[-1]
             if client.check_server_credentials(server_id=response[1], rand_num=response[2]) and client_id == client.id:
                 if pck == DATA_ACK:
-                    print("\tDades acceptades!")
+                    logger.debug_print("\tDades acceptades!")
                 elif pck == DATA_NACK:
-                    print("\tDades no acceptades, proba a reenviarles")
+                    logger.debug_print(
+                        "\tDades no acceptades, proba a reenviarles")
                 else:
                     client.current_state = NOT_REGISTERED
             else:
@@ -319,15 +339,15 @@ def set_data(sock, elem, value):
              elem, "", "Tipus de l'element incorrecte")
     else:
         client.elems[elem] = value
-        print(
-            f"=> Valor {value} assignat a l'element {elem} per el servidor")
+        logger.debug_print(
+            f"Valor {value} assignat a l'element {elem} per el servidor")
         send(sock, DATA_ACK, client.id,
              client.rand_num, elem, value, client.id)
 
 
 def get_data(sock, elem):
-    print(
-        f"=> Dades de l'element {elem} demanades per el servidor.")
+    logger.debug_print(
+        f"Dades de l'element {elem} demanades per el servidor.")
     value = client.elems[elem]
     send(sock, DATA_ACK, client.id,
          client.rand_num, elem, value, client.id)
@@ -365,25 +385,31 @@ def sig_handler(signum, frame):
     sys.exit(0)
 
 
+signal.signal(signal.SIGQUIT, sig_handler)
+signal.signal(signal.SIGINT, sig_handler)
+signal.signal(signal.SIGTSTP, sig_handler)
+
+
 if __name__ == '__main__':
-    signal.signal(signal.SIGQUIT, sig_handler)
-    signal.signal(signal.SIGINT, sig_handler)
-    signal.signal(signal.SIGTSTP, sig_handler)
     try:
         server_udp_address = (client.server, client.server_udp)
         udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         udp_sock.bind(client.local_address())
         while not client.has_state(DISCONNECTED):
             if client.has_state(NOT_REGISTERED):
-                print("\nRegistrant disposisitiu al servidor...")
+                logger.debug_print("Registrant disposisitiu al servidor...")
                 # Iniciem la fase de registre
                 register(udp_sock, server_udp_address)
                 if client.has_state(REGISTERED):
+                    logger.debug_print("Enviant paquets ALIVE al servidor")
                     # Comencem a enviar paquets ALIVE al servidor
                     run_send_alive(udp_sock, server_udp_address)
                     # Esperem el primer paquet alive
                     recv_first_alive(udp_sock)
                 if client.has_state(SEND_ALIVE):
+                    logger.debug_print("Primer paquet ALIVE rebut")
+                    logger.debug_print(
+                        "Registre finalitzat, estat actual: SEND_ALIVE")
                     # Iniciem la rebuda de ALIVEs del servidor
                     run_recv_alive(udp_sock)
                     # Obrim el port tcp local per a les connexions amb el servidor
