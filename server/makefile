@@ -1,9 +1,9 @@
 #
 #
-LDFLAGS= -ansi -pedantic -Wall -std=c99
+LDFLAGS= -ansi -pedantic -Wall -lrt -pthread -std=c99  
 
 all: server.c
-	gcc -o server server.c $(LDFLAGS)
+	gcc server.c -o server $(LDFLAGS)
 
 clean: 
 	-rm -rf server

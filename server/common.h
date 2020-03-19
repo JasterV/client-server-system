@@ -1,7 +1,22 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+
 #include <ctype.h>
 #include <string.h>
+
+#include <signal.h>
+#include <pthread.h>
+
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#include <sys/socket.h>
+#include <sys/types.h>
+
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 /*--------------TIPUS DE PAQUETS-------------*/
 
@@ -38,29 +53,30 @@ unsigned char SEND_ALIVE = 0xa6;
 /*-------------STRUCTS-------------*/
 typedef struct client_info
 {
+    unsigned char state;
     const char *id;
     const char *rand_num;
     const char *ip;
-    unsigned char state;
     const char *elems;
+    unsigned short tcp_port;
 } client_info;
 
 typedef struct udp_pdu
 {
     unsigned char pack;
-    const char *id;
-    const char *rand_num;
-    const char *data;
+    const char id[13];
+    const char rand_num[9];
+    const char data[61];
 } udp_pdu;
 
 typedef struct tcp_pdu
 {
     unsigned char pack;
-    const char *id;
-    const char *rand_num;
-    const char *elem;
-    const char *value;
-    const char *data;
+    const char id[13];
+    const char rand_num[9];
+    const char elem[8];
+    const char value[16];
+    const char data[80];
 } tcp_pdu;
 
 typedef struct config
@@ -97,30 +113,7 @@ void checkInt(int result, const char *message)
     }
 }
 
-/*-----------------CONFIG FILES READING------------------*/
-char *trim(char *str)
-{
-    char *end;
-    /*left trim*/
-    while (isspace((unsigned char)*str))
-        str++;
-    if (*str == 0) /*Es tot espais*/
-        return str;
-    /*Right trim*/
-    end = str + strlen(str) - 1;
-    while (end > str && (isspace((unsigned char)*end) || (unsigned char)*end == '\n'))
-        end--;
-    end[1] = '\0';
-    return str;
-}
-
-char *getInfo(char *line)
-{
-    char *info = strrchr(line, '=');
-    info++;
-    return info;
-}
-
+/*-----------READING UTILITIES------------*/
 char *getLine(FILE *fp)
 {
     size_t len = 3;
@@ -147,83 +140,18 @@ char *getLine(FILE *fp)
     return line;
 }
 
-char *getInfoFromLine(FILE *fp)
+char *trim(char *str)
 {
-    char *line, *info;
-    line = getLine(fp);
-    if (line == NULL)
-        return NULL;
-    info = trim(getInfo(line));
-    return info;
-}
-
-config *readConfig(const char *filename)
-{
-    const char *id, *udp, *tcp;
-    FILE *fp = fopen(filename, "r");
-    config *cfg = (config *)malloc(sizeof(config));
-    if (fp == NULL)
-    {
-        free(cfg);
-        return NULL;
-    }
-    if ((id = getInfoFromLine(fp)) == NULL)
-    {
-        free(cfg);
-        return NULL;
-    }
-    if ((udp = getInfoFromLine(fp)) == NULL)
-    {
-        free(cfg);
-        return NULL;
-    }
-    if ((tcp = getInfoFromLine(fp)) == NULL)
-    {
-        free(cfg);
-        return NULL;
-    }
-    cfg->id = id;
-    cfg->udp_port = atoi(udp);
-    cfg->tcp_port = atoi(tcp);
-    fclose(fp);
-    return cfg;
-}
-
-client_info **readDb(FILE *fp)
-{
-    size_t len = 1;
-    client_info **db = (client_info **)malloc(len * sizeof(client_info *));
-    char *line;
-    int i = 0;
-    while ((line = getLine(fp)) != NULL)
-    {
-        client_info *client = (client_info *)malloc(sizeof(client_info));
-        client->id = line;
-        client->elems = NULL;
-        client->ip = NULL;
-        client->rand_num = NULL;
-        client->state = DISCONNECTED;
-        db[i] = client;
-        i++;
-        if (i == len)
-        {
-            len++;
-            db = (client_info **)realloc(db, len * (sizeof(client_info *)));
-        }
-    }
-    if (i == 0)
-    {
-        free(db);
-        return NULL;
-    }
-    db[i] = NULL;
-    return db;
-}
-
-client_info **readDbFile(const char *filename)
-{
-    FILE *fp = fopen(filename, "r");
-    if (fp == NULL)
-        return NULL;
-    return readDb(fp);
+    char *end;
+    /*left trim*/
+    while (isspace((unsigned char)*str))
+        str++;
+    if (*str == 0) /*Es tot espais*/
+        return str;
+    /*Right trim*/
+    end = str + strlen(str) - 1;
+    while (end > str && (isspace((unsigned char)*end) || (unsigned char)*end == '\n'))
+        end--;
+    end[1] = '\0';
+    return str;
 }

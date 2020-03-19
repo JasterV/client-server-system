@@ -4,6 +4,8 @@
         "./client"
     ],
     "files.associations": {
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "socket.h": "c",
+        "types.h": "c"
     },
 }

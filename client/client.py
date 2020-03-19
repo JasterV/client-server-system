@@ -1,81 +1,16 @@
 #!/usr/bin/env python3.6
-
-import socket
-import sys
-import struct
-import select
-import time
-import datetime
-import threading
-import signal
-from protocol import *
-from packages import *
-from states import *
-from classes import Client
-from logger import Logger
-
-# Creem una instancia de la classe logger
-# que ens permetrà printar missatges de debug
-logger = Logger()
-cfgname = "client.cfg"
-# Analitzem els arguments
-# introduits per el script
-if len(sys.argv) > 1:
-    option = sys.argv[1]
-    if option == '-c':
-        if len(sys.argv) != 3:
-            print(f"{sys.argv[0]} {sys.argv[1]} <filename>")
-        cfgname = sys.argv[2]
-    elif option == '-d':
-        logger.turn_debug_on()
-
-# Creem una instancia de la classe Client
-# que ens ajudarà a gestionar variables com el estat
-# del client i la seva configuració
-client = Client(cfgname)
+from common import *
 
 
-def unpack_response(fmt, response):
-    t = struct.unpack(fmt, response)
-    return tuple(x if isinstance(x, int) else x.split(b'\x00')[0].decode() for x in t)
+def sig_handler(signum, frame):
+    # Realitzem un exit el qual tanca tots els
+    # descriptors de fitxers relacionats amb el procés
+    sys.exit(0)
 
 
-def recvfrom(sock):
-    response, server_addr = sock.recvfrom(84)
-    return unpack_response('!B13s9s61s', response), server_addr
-
-
-def sendto(sock, address, pack_type, client_id, rand_num, info):
-    data = struct.pack('!B13s9s61s', pack_type, client_id.encode(),
-                       rand_num.encode(), info.encode())
-    sock.sendto(data, address)
-
-
-def recv(sock):
-    response = sock.recv(127)
-    return unpack_response('!B13s9s8s16s80s', response)
-
-
-def send(sock, pack_type, client_id, rand_num, elem_name, elem_value, info):
-    data = struct.pack('!B13s9s8s16s80s', pack_type, client_id.encode(), rand_num.encode(
-    ), elem_name.encode(), elem_value.encode(), info.encode())
-    sock.send(data)
-
-
-def build_info_data(local_tcp, params: dict):
-    result = ""
-    result += str(local_tcp) + ','
-    list(params)
-    result += ';'.join(params)
-    return result
-
-
-def get_actual_date():
-    date = datetime.datetime.now()
-    info = str(date.year) + "-" + str(date.month) + "-" + str(date.day)
-    info += ";"
-    info += str(date.hour) + ":" + str(date.minute) + ":" + str(date.second)
-    return info
+signal.signal(signal.SIGQUIT, sig_handler)
+signal.signal(signal.SIGINT, sig_handler)
+signal.signal(signal.SIGTSTP, sig_handler)
 
 # --------------------------------------------------------------
 # --------------------- FASE DE REGISTRE -----------------------
@@ -129,8 +64,8 @@ def send_reg_req(sock, server_address, num_sends, timeout):
 def send_info(sock, server_address, num_reg_sends, reg_timeout):
     global client
     info_timeout = t * 2
-    data = build_info_data(client.local_tcp, client.elems)
     address = (client.server_ip, client.udp_port)
+    data = f"{str(client.local_tcp)},{';'.join(list(client.elems))}"
     sendto(sock, address, REG_INFO, client.id, client.rand_num, data)
     client.current_state = WAIT_ACK_INFO
     (inputs, _, _) = select.select([sock], [], [], info_timeout)
@@ -225,7 +160,7 @@ def start_cli():
     print("\nBenvingut, introdueix 'help' per veure les comandes acceptades.")
     while client.has_state(SEND_ALIVE):
         try:
-            cmd = input(">> ").strip().split()
+            cmd = input().strip().split()
             if len(cmd) == 0:
                 pass
             elif cmd[0] == 'help':
@@ -353,8 +288,8 @@ def get_data(sock, elem):
          client.rand_num, elem, value, client.id)
 
 
-# ----------------------------------------------------------------
-# ------------------------MAIN BLOCK-----------------------------
+# ---------------------------------------------------------------
+# ------------------------THREADS CREATION-----------------------
 # ---------------------------------------------------------------
 
 def run_send_alive(udp_sock, server_address):
@@ -379,51 +314,60 @@ def run_connections(sock):
     wait_connections.start()
 
 
-def sig_handler(signum, frame):
+# ---------------------------------------------------------------
+# ------------------------MAIN BLOCK-----------------------------
+# ---------------------------------------------------------------
+# Creem una instancia de la classe logger
+# que ens permetrà printar missatges de debug
+logger = Logger()
+cfgname = "client.cfg"
+# Analitzem els arguments
+# introduits per el script
+if len(sys.argv) > 1:
+    option = sys.argv[1]
+    if option == '-c':
+        if len(sys.argv) != 3:
+            print(f"{sys.argv[0]} {sys.argv[1]} <filename>")
+        cfgname = sys.argv[2]
+    elif option == '-d':
+        logger.turn_debug_on()
+# Creem una instancia de la classe Client
+# que ens ajudarà a gestionar variables com el estat
+# del client i la seva configuració
+client = Client(cfgname)
+try:
+    server_udp_address = (client.server, client.server_udp)
+    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_sock.bind(client.local_address())
+    while not client.has_state(DISCONNECTED):
+        if client.has_state(NOT_REGISTERED):
+            logger.debug_print("Registrant disposisitiu al servidor...")
+            # Iniciem la fase de registre
+            register(udp_sock, server_udp_address)
+            if client.has_state(REGISTERED):
+                logger.debug_print("Enviant paquets ALIVE al servidor")
+                # Comencem a enviar paquets ALIVE al servidor
+                run_send_alive(udp_sock, server_udp_address)
+                # Esperem el primer paquet alive
+                recv_first_alive(udp_sock)
+            if client.has_state(SEND_ALIVE):
+                logger.debug_print("Primer paquet ALIVE rebut")
+                logger.debug_print(
+                    "Registre finalitzat, estat actual: SEND_ALIVE")
+                # Iniciem la rebuda de ALIVEs del servidor
+                run_recv_alive(udp_sock)
+                # Obrim el port tcp local per a les connexions amb el servidor
+                tcp_sock = socket.socket(
+                    socket.AF_INET, socket.SOCK_STREAM)
+                tcp_sock.bind(('', client.local_tcp))
+                tcp_sock.listen()
+                # Obrim la consola de comandes
+                run_cli()
+                # Iniciem la espera de connexions amb el servidor
+                run_connections(tcp_sock)
+except OSError as err:
+    print(f"OSError: {err}")
+finally:
     # Realitzem un exit el qual tanca tots els
     # descriptors de fitxers relacionats amb el procés
     sys.exit(0)
-
-
-signal.signal(signal.SIGQUIT, sig_handler)
-signal.signal(signal.SIGINT, sig_handler)
-signal.signal(signal.SIGTSTP, sig_handler)
-
-
-if __name__ == '__main__':
-    try:
-        server_udp_address = (client.server, client.server_udp)
-        udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        udp_sock.bind(client.local_address())
-        while not client.has_state(DISCONNECTED):
-            if client.has_state(NOT_REGISTERED):
-                logger.debug_print("Registrant disposisitiu al servidor...")
-                # Iniciem la fase de registre
-                register(udp_sock, server_udp_address)
-                if client.has_state(REGISTERED):
-                    logger.debug_print("Enviant paquets ALIVE al servidor")
-                    # Comencem a enviar paquets ALIVE al servidor
-                    run_send_alive(udp_sock, server_udp_address)
-                    # Esperem el primer paquet alive
-                    recv_first_alive(udp_sock)
-                if client.has_state(SEND_ALIVE):
-                    logger.debug_print("Primer paquet ALIVE rebut")
-                    logger.debug_print(
-                        "Registre finalitzat, estat actual: SEND_ALIVE")
-                    # Iniciem la rebuda de ALIVEs del servidor
-                    run_recv_alive(udp_sock)
-                    # Obrim el port tcp local per a les connexions amb el servidor
-                    tcp_sock = socket.socket(
-                        socket.AF_INET, socket.SOCK_STREAM)
-                    tcp_sock.bind(('', client.local_tcp))
-                    tcp_sock.listen()
-                    # Obrim la consola de comandes
-                    run_cli()
-                    # Iniciem la espera de connexions amb el servidor
-                    run_connections(tcp_sock)
-    except OSError as err:
-        print(f"OSError: {err}")
-    finally:
-        # Realitzem un exit el qual tanca tots els
-        # descriptors de fitxers relacionats amb el procés
-        sys.exit(0)
