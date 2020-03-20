@@ -14,10 +14,8 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-
+#include <sys/ipc.h>
+#include <sys/shm.h>
 /*--------------TIPUS DE PAQUETS-------------*/
 
 /* Paquets de la fase de registre */
@@ -61,6 +59,12 @@ typedef struct client_info
     unsigned short tcp_port;
 } client_info;
 
+typedef struct clients_db
+{
+    client_info *clients;
+    int length;
+} clients_db;
+
 typedef struct udp_pdu
 {
     unsigned char pack;
@@ -95,16 +99,7 @@ void debugPrint(const char *message)
         printf("%s -> %s\n", __TIME__, message);
 }
 
-void checkPointer(void *p, const char *message)
-{
-    if (p == NULL)
-    {
-        perror(message);
-        exit(EXIT_FAILURE);
-    }
-}
-
-void checkInt(int result, const char *message)
+void check(int result, const char *message)
 {
     if (result < 0)
     {
@@ -154,4 +149,17 @@ char *trim(char *str)
         end--;
     end[1] = '\0';
     return str;
+}
+
+char *getCfgLineInfo(FILE *fp)
+{
+    char *line = getLine(fp);
+    if (line == NULL)
+        return NULL;
+    char *tmp = strrchr(line, '=');
+    tmp++;
+    char *info = trim(tmp);
+    if (strlen(info) <= 0)
+        return NULL;
+    return info;
 }

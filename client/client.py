@@ -2,15 +2,9 @@
 from common import *
 
 
-def sig_handler(signum, frame):
-    # Realitzem un exit el qual tanca tots els
-    # descriptors de fitxers relacionats amb el procés
-    sys.exit(0)
-
-
-signal.signal(signal.SIGQUIT, sig_handler)
-signal.signal(signal.SIGINT, sig_handler)
-signal.signal(signal.SIGTSTP, sig_handler)
+signal.signal(signal.SIGQUIT, signal.SIG_IGN)
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGTSTP, signal.SIG_IGN)
 
 # --------------------------------------------------------------
 # --------------------- FASE DE REGISTRE -----------------------
@@ -237,6 +231,12 @@ def run_send(sock, cmd):
                     client.current_state = NOT_REGISTERED
             else:
                 client.current_state = NOT_REGISTERED
+
+
+def get_actual_date():
+    date = datetime.datetime.now()
+    info = f'{str(date.year)}-{str(date.month)}-{str(date.day)};{str(date.hour)}:{str(date.minute)}:{str(date.second)}'
+    return info
 
 
 # --------------------------------------------------------------

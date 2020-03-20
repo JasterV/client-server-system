@@ -105,13 +105,6 @@ def send(sock, pack_type, client_id, rand_num, elem_name, elem_value, info):
     ), elem_name.encode(), elem_value.encode(), info.encode())
     sock.send(data)
 
-
-def get_actual_date():
-    date = datetime.datetime.now()
-    info = f'{str(date.year)}-{str(date.month)}-{str(date.day)};{str(date.hour)}:{str(date.minute)}:{str(date.second)}'
-    return info
-
-
 # -------------------------------------
 # ------------CLIENT CLASS-------------
 # -------------------------------------

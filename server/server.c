@@ -1,27 +1,24 @@
 #include "common.h"
 
-config *CFG;
-client_info **DB;
-int udp_socket;
-int tcp_socket;
-
-char *getInfo(char *line);
-char *getInfoFromLine(FILE *fp);
-config *readConfig(const char *filename);
-client_info **readDbFile(const char *filename);
+int readConfig(config *cfg, const char *filename);
+int readDb(clients_db *db, const char *filename);
 void handler(int sig);
 void *attendReg(void *arg);
+int shareDb();
+int shareClientsInfo();
+
+config cfg;
+clients_db *cdb;
 
 int main(int argc, char const *argv[])
 {
     signal(SIGTSTP, handler);
-    signal(SIGQUIT, handler);
-    signal(SIGINT, handler);
-    signal(SIGCHLD, SIG_IGN);
+    signal(SIGQUIT, SIG_IGN);
+    signal(SIGINT, SIG_IGN);
+    signal(SIGCHLD, handler);
 
-    struct sockaddr_in udp_address;
-    struct sockaddr_in tcp_address;
-
+    /*Compartim la estructura clients_db en memoria*/
+    shareDb();
     /*Llegim els fitxers de configuració i dispositius*/
     const char *cfgname = "server.cfg";
     const char *dbname = "bbdd_dev.dat";
@@ -50,41 +47,42 @@ int main(int argc, char const *argv[])
             dbname = argv[2];
         }
     }
-    /*Llegim el fitxer de configuració*/
-    checkPointer((CFG = readConfig(cfgname)),
-                 "Error llegint el fitxer de configuració.\n");
-    /*Llegim el fitxer de dispositius*/
-    checkPointer((DB = readDbFile(dbname)),
-                 "Error llegint el fitxer de dispositius.\n");
-
-    /*Connectem el socket udp al port corresponent*/
-    checkInt((udp_socket = socket(AF_INET, SOCK_DGRAM, 0)),
-             "Error al connectar el socket udp.\n");
+    /*Llegim els fitxer de configuració i dispositius*/
+    check(readConfig(&cfg, cfgname),
+          "Error llegint el fitxer de configuració.\n");
+    check(readDb(cdb, dbname),
+          "Error llegint el fitxer de dispositius.\n");
+    /*Un cop es sap quants dispositius estan registrats 
+     a la base de dades, compartim la estructura clients_info en memoria*/
+    shareClientsInfo();
+    /* CREACIÓ DEL SOCKET UDP*/
+    int udp_socket;
+    struct sockaddr_in udp_address;
+    check((udp_socket = socket(AF_INET, SOCK_DGRAM, 0)),
+          "Error al connectar el socket udp.\n");
     udp_address.sin_family = AF_INET;
-    udp_address.sin_port = htons(CFG->udp_port);
+    udp_address.sin_port = htons(cfg.udp_port);
     udp_address.sin_addr.s_addr = INADDR_ANY;
-    checkInt(bind(udp_socket, (struct sockaddr *)&udp_address, sizeof(udp_address)),
-             "Error al fer el bind del socket udp.\n");
-
-    /*Connectem el socket tcp al port corresponent*/
-    checkInt((tcp_socket = socket(AF_INET, SOCK_STREAM, 0)),
-             "Error al connectar el socket tcp.\n");
+    check(bind(udp_socket, (struct sockaddr *)&udp_address, sizeof(udp_address)),
+          "Error al fer el bind del socket udp.\n");
+    /*CREACIÓ DEL SOCKET TCP*/
+    int tcp_socket;
+    struct sockaddr_in tcp_address;
+    check((tcp_socket = socket(AF_INET, SOCK_STREAM, 0)),
+          "Error al connectar el socket tcp.\n");
     tcp_address.sin_family = AF_INET;
-    tcp_address.sin_port = htons(CFG->tcp_port);
+    tcp_address.sin_port = htons(cfg.tcp_port);
     tcp_address.sin_addr.s_addr = INADDR_ANY;
-    checkInt(bind(tcp_socket, (struct sockaddr *)&tcp_address, sizeof(tcp_address)),
-             "Error al fer el bind del socket tcp.\n");
-    checkInt(listen(tcp_socket, 100), "Error listening.\n");
+    check(bind(tcp_socket, (struct sockaddr *)&tcp_address, sizeof(tcp_address)),
+          "Error al fer el bind del socket tcp.\n");
+    check(listen(tcp_socket, 100), "Error listening.\n");
 
     pthread_t attendRegisters;
     /*pthread_t waitTcpConnections;*/
     /*pthread_t cli;*/
-
-    pthread_create(&attendRegisters, NULL, attendReg, NULL);
+    pthread_create(&attendRegisters, NULL, attendReg, &udp_socket);
     pthread_join(attendRegisters, NULL);
 
-    free(DB);
-    free(CFG);
     exit(EXIT_SUCCESS);
 }
 
@@ -93,104 +91,110 @@ void handler(int sig)
     exit(EXIT_SUCCESS);
 }
 
+int shareDb()
+{
+    /*Compartim memoria*/
+    int db_shmid;
+    check((db_shmid = shmget(IPC_PRIVATE, sizeof(clients_db), IPC_CREAT | 0775)), "Error al compartir memoria\n");
+    if ((cdb = (clients_db *)shmat(db_shmid, NULL, 0)) == NULL)
+    {
+        perror("Error al mapejar memoria\n");
+        exit(EXIT_FAILURE);
+    }
+    return 0;
+}
+
+int shareClientsInfo()
+{
+    int cl_shmid;
+    client_info *tmp;
+    check((cl_shmid = shmget(IPC_PRIVATE, cdb->length * sizeof(client_info), IPC_CREAT | 0775)), "Error al compartir memoria\n");
+    if ((tmp = (client_info *)shmat(cl_shmid, NULL, 0)) == NULL)
+    {
+        perror("Error al mapejar memoria\n");
+        exit(EXIT_FAILURE);
+    }
+    for (int i = 0; i < cdb->length; i++)
+        tmp[i] = cdb->clients[i];
+    free(cdb->clients);
+    cdb->clients = tmp;
+    return 0;
+}
+
 void *attendReg(void *arg)
 {
+    int udp_socket = *(int *)arg;
     udp_pdu pdu;
     struct sockaddr_in client_address;
-    while (1)
+
+    memset(&pdu, 0, sizeof(udp_pdu));
+    memset(&client_address, 0, sizeof(struct sockaddr_in));
+    recvfrom(udp_socket, &pdu, sizeof(udp_pdu), 0, (struct sockaddr *)&client_address, NULL);
+    printf("Paquet rebut\n");
+    if (fork() == 0)
     {
-        memset(&pdu, 0, sizeof(udp_pdu));
-        memset(&client_address, 0, sizeof(struct sockaddr_in));
-        recvfrom(udp_socket, &pdu, sizeof(udp_pdu), 0, (struct sockaddr *)&client_address, NULL);
-        printf("Paquet rebut\n");
+        while (1)
+        {
+            sleep(1);
+            cdb->clients[0].tcp_port += 1;
+        }
     }
-    exit(0);
     return NULL;
 }
 
 /*-----------------CONFIG FILES READING------------------*/
 
-config *readConfig(const char *filename)
+int readConfig(config *cfg, const char *filename)
 {
-    const char *id, *udp, *tcp;
+    char *attrs[3];
     FILE *fp;
     if ((fp = fopen(filename, "r")) == NULL)
+        return -1;
+    for (int i = 0; i < 3; i++)
     {
-        return NULL;
+        if ((attrs[i] = getCfgLineInfo(fp)) == NULL)
+        {
+            fclose(fp);
+            return -1;
+        }
     }
-    config *cfg = (config *)malloc(sizeof(config));
-    if ((id = getInfoFromLine(fp)) == NULL)
-    {
-        fclose(fp);
-        free(cfg);
-        return NULL;
-    }
-    if ((udp = getInfoFromLine(fp)) == NULL)
-    {
-        fclose(fp);
-        free(cfg);
-        return NULL;
-    }
-    if ((tcp = getInfoFromLine(fp)) == NULL)
-    {
-        fclose(fp);
-        free(cfg);
-        return NULL;
-    }
-    cfg->id = id;
-    cfg->udp_port = atoi(udp);
-    cfg->tcp_port = atoi(tcp);
+    cfg->id = attrs[0];
+    cfg->udp_port = atoi(attrs[1]);
+    cfg->tcp_port = atoi(attrs[2]);
     fclose(fp);
-    return cfg;
+    return 0;
 }
 
-client_info **readDbFile(const char *filename)
+int readDb(clients_db *db, const char *filename)
 {
     FILE *fp;
-    int len = 1;
     if ((fp = fopen(filename, "r")) == NULL)
-        return NULL;
-    client_info **db = (client_info **)malloc(len * sizeof(client_info *));
+        return -1;
+    client_info *clients = (client_info *)malloc(sizeof(client_info));
     char *line;
-    int i = 0;
+    int len = 1, i = 0;
     while ((line = getLine(fp)) != NULL)
     {
-        client_info *client = (client_info *)malloc(sizeof(client_info));
-        memset(client, 0, sizeof(client_info));
-        client->id = line;
-        client->state = DISCONNECTED;
-        db[i] = client;
-        i++;
         if (i == len)
         {
             len++;
-            db = (client_info **)realloc(db, len * (sizeof(client_info *)));
+            clients = realloc(clients, len * sizeof(client_info));
         }
+        client_info client;
+        memset(&client, 0, sizeof(client_info));
+        client.id = line;
+        client.state = DISCONNECTED;
+        clients[i] = client;
+        i++;
     }
     if (i == 0)
     {
         fclose(fp);
-        free(db);
-        return NULL;
+        free(clients);
+        return -1;
     }
     fclose(fp);
-    db[i] = NULL;
-    return db;
-}
-
-char *getInfo(char *line)
-{
-    char *info = strrchr(line, '=');
-    info++;
-    return info;
-}
-
-char *getInfoFromLine(FILE *fp)
-{
-    char *line, *info;
-    line = getLine(fp);
-    if (line == NULL)
-        return NULL;
-    info = trim(getInfo(line));
-    return info;
+    db->clients = clients;
+    db->length = len;
+    return 0;
 }
