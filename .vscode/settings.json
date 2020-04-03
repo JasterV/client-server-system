@@ -6,6 +6,7 @@
     "files.associations": {
         "stdlib.h": "c",
         "socket.h": "c",
-        "types.h": "c"
+        "types.h": "c",
+        "socket_type.h": "c"
     },
 }

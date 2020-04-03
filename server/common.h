@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <ctype.h>
 #include <string.h>
@@ -12,7 +13,9 @@
 #include <arpa/inet.h>
 
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <sys/types.h>
+#include<time.h>
 
 #include <sys/ipc.h>
 #include <sys/shm.h>
@@ -68,27 +71,33 @@ typedef struct clients_db
 typedef struct udp_pdu
 {
     unsigned char pack;
-    const char id[13];
-    const char rand_num[9];
-    const char data[61];
+    char id[13];
+    char rand_num[9];
+    char data[61];
 } udp_pdu;
 
 typedef struct tcp_pdu
 {
     unsigned char pack;
-    const char id[13];
-    const char rand_num[9];
-    const char elem[8];
-    const char value[16];
-    const char data[80];
+    char id[13];
+    char rand_num[9];
+    char elem[8];
+    char value[16];
+    char data[80];
 } tcp_pdu;
 
 typedef struct config
 {
-    const char *id;
+    char *id;
     int udp_port;
     int tcp_port;
 } config;
+
+int generateRandNum(int min, int max)
+{
+    srand(time(0));
+    return rand() % (max + 1 - min) + min;
+}
 
 /*---------------DEBUG UTILITIES--------------*/
 int DEBUG_ON = 0;
@@ -96,7 +105,7 @@ int DEBUG_ON = 0;
 void debugPrint(const char *message)
 {
     if (DEBUG_ON)
-        printf("%s -> %s\n", __TIME__, message);
+        printf("%s => %s\n", __TIME__, message);
 }
 
 void check(int result, const char *message)
@@ -108,6 +117,32 @@ void check(int result, const char *message)
     }
 }
 
+/*-----------SOCKETS UTILITIES------------*/
+int bindToPort(int socket, struct sockaddr_in *address, int port)
+{
+    address->sin_family = AF_INET;
+    address->sin_port = htons(port);
+    address->sin_addr.s_addr = INADDR_ANY;
+    return bind(socket, (struct sockaddr *)address, sizeof(struct sockaddr));
+}
+
+int bindAndGetFreePort(int sck, struct sockaddr_in *address)
+{
+    address->sin_family = AF_INET;
+    address->sin_addr.s_addr = INADDR_ANY;
+    while (1)
+    {
+        int port = generateRandNum(1024, 65535);
+        address->sin_port = htons(port);
+        if (bind(sck, (struct sockaddr *)address, sizeof(struct sockaddr_in)) < 0)
+            if (errno == EADDRINUSE)
+                continue;
+            else
+                return -1;
+        else
+            return port;
+    }
+}
 /*-----------READING UTILITIES------------*/
 char *getLine(FILE *fp)
 {
