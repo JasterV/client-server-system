@@ -6,6 +6,7 @@ import time
 import datetime
 import threading
 import signal
+import os
 
 
 # Paquets de la fase de registre

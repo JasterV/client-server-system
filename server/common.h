@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <sys/wait.h>
 
 #include <ctype.h>
 #include <string.h>
@@ -19,6 +20,7 @@
 
 #include <sys/ipc.h>
 #include <sys/shm.h>
+
 /*--------------TIPUS DE PAQUETS-------------*/
 
 /* Paquets de la fase de registre */
@@ -60,6 +62,7 @@ typedef struct client_info
     const char *ip;
     const char *elems;
     unsigned short tcp_port;
+    time_t last_alive;
 } client_info;
 
 typedef struct clients_db
@@ -117,32 +120,6 @@ void check(int result, const char *message)
     }
 }
 
-/*-----------SOCKETS UTILITIES------------*/
-int bindToPort(int socket, struct sockaddr_in *address, int port)
-{
-    address->sin_family = AF_INET;
-    address->sin_port = htons(port);
-    address->sin_addr.s_addr = INADDR_ANY;
-    return bind(socket, (struct sockaddr *)address, sizeof(struct sockaddr));
-}
-
-int bindAndGetFreePort(int sck, struct sockaddr_in *address)
-{
-    address->sin_family = AF_INET;
-    address->sin_addr.s_addr = INADDR_ANY;
-    while (1)
-    {
-        int port = generateRandNum(1024, 65535);
-        address->sin_port = htons(port);
-        if (bind(sck, (struct sockaddr *)address, sizeof(struct sockaddr_in)) < 0)
-            if (errno == EADDRINUSE)
-                continue;
-            else
-                return -1;
-        else
-            return port;
-    }
-}
 /*-----------READING UTILITIES------------*/
 char *getLine(FILE *fp)
 {
