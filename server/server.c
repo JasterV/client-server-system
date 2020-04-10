@@ -52,7 +52,8 @@ int main(int argc, char const *argv[])
     check(readDb(&cdb, dbname),
           "Error llegint el fitxer de dispositius.\n");
     /* COMPARTIM LA LLISTA DE CLIENTS */
-    int shmid = shmget(IPC_PRIVATE, cdb.length * sizeof(client_info), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    int shmid;
+    check((shmid = shmget(IPC_PRIVATE, cdb.length * sizeof(client_info), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR)), "Error compartint memoria\n");
     shareClientsInfo(shmid);
     /* CREEM ELS SOCKETS I FEM BIND */
     int udp_socket, tcp_socket;
