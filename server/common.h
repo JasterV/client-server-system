@@ -16,11 +16,13 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <sys/types.h>
-#include<time.h>
+#include <time.h>
 
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <sys/stat.h>
 
+#define SERVER_BACKLOG 100 
 /*--------------TIPUS DE PAQUETS-------------*/
 
 /* Paquets de la fase de registre */
@@ -102,7 +104,9 @@ int generateRandNum(int min, int max)
     return rand() % (max + 1 - min) + min;
 }
 
+/*--------------------------------------------*/
 /*---------------DEBUG UTILITIES--------------*/
+/*--------------------------------------------*/
 int DEBUG_ON = 0;
 
 void debugPrint(const char *message)
@@ -111,16 +115,9 @@ void debugPrint(const char *message)
         printf("%s => %s\n", __TIME__, message);
 }
 
-void check(int result, const char *message)
-{
-    if (result < 0)
-    {
-        perror(message);
-        exit(EXIT_FAILURE);
-    }
-}
-
+/*----------------------------------------*/
 /*-----------READING UTILITIES------------*/
+/*----------------------------------------*/
 char *getLine(FILE *fp)
 {
     size_t len = 3;
@@ -174,4 +171,59 @@ char *getCfgLineInfo(FILE *fp)
     if (strlen(info) <= 0)
         return NULL;
     return info;
+}
+
+int readConfig(config *cfg, const char *filename)
+{
+    char *attrs[3];
+    FILE *fp;
+    if ((fp = fopen(filename, "r")) == NULL)
+        return -1;
+    for (int i = 0; i < 3; i++)
+    {
+        if ((attrs[i] = getCfgLineInfo(fp)) == NULL)
+        {
+            fclose(fp);
+            return -1;
+        }
+    }
+    cfg->id = attrs[0];
+    cfg->udp_port = atoi(attrs[1]);
+    cfg->tcp_port = atoi(attrs[2]);
+    fclose(fp);
+    return 0;
+}
+
+int readDb(clients_db *db, const char *filename)
+{
+    FILE *fp;
+    if ((fp = fopen(filename, "r")) == NULL)
+        return -1;
+    client_info *clients = (client_info *)malloc(sizeof(client_info));
+    char *line;
+    int len = 1, i = 0;
+    while ((line = getLine(fp)) != NULL)
+    {
+        if (i == len)
+        {
+            len++;
+            clients = realloc(clients, len * sizeof(client_info));
+        }
+        client_info client;
+        memset(&client, 0, sizeof(client_info));
+        client.id = line;
+        client.state = DISCONNECTED;
+        clients[i] = client;
+        i++;
+    }
+    if (i == 0)
+    {
+        fclose(fp);
+        free(clients);
+        return -1;
+    }
+    fclose(fp);
+    db->clients = clients;
+    db->length = len;
+    return 0;
 }
