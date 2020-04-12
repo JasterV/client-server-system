@@ -109,7 +109,6 @@ def recv_first_alive(sock):
         else:
             client.current_state = NOT_REGISTERED
     else:
-        print("NO MHA ARRIBAT EL PRIMER SEND ALIVE")
         client.current_state = NOT_REGISTERED
 
 
