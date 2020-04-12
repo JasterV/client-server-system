@@ -73,37 +73,6 @@ typedef struct clients_db
     int length;
 } clients_db;
 
-int isAuthorized(clients_db *db, const char *id)
-{
-    for (int i = 0; i < db->length; i++)
-        if (strcmp(id, db->clients[i].id) == 0)
-            return i;
-    return -1;
-}
-
-void disconnectClient(clients_db *db, int index)
-{
-    db->clients[index].state = DISCONNECTED;
-    strcpy(db->clients[index].randNum, "00000000");
-    db->clients[index].tcpPort = -1;
-    db->clients[index].lastAlive = (time_t)-1;
-}
-
-int shareClientsInfo(clients_db *db)
-{
-    int shmid;
-    if ((shmid = shmget(IPC_PRIVATE, db->length * sizeof(client_info), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR)) == -1)
-        return -1;
-    client_info *tmp;
-    if ((tmp = shmat(shmid, (void *)0, 0)) == (void *)-1)
-        return -1;
-    for (int i = 0; i < db->length; i++)
-        tmp[i] = db->clients[i];
-    free(db->clients);
-    db->clients = tmp;
-    return 0;
-}
-
 typedef struct udp_pdu
 {
     unsigned char pack;
@@ -150,7 +119,10 @@ int DEBUG_ON = 0;
 void debugPrint(const char *message)
 {
     if (DEBUG_ON)
+    {
         printf("%s => %s\n", __TIME__, message);
+        fflush(stdout);
+    }
 }
 
 void check(int result, const char *message)
@@ -160,6 +132,45 @@ void check(int result, const char *message)
         perror(message);
         exit(EXIT_FAILURE);
     }
+}
+
+/*--------------------------------------------*/
+/*---------------DATABASE UTILS---------------*/
+/*--------------------------------------------*/
+
+int isAuthorized(clients_db *db, const char *id)
+{
+    for (int i = 0; i < db->length; i++)
+        if (strcmp(id, db->clients[i].id) == 0)
+            return i;
+    return -1;
+}
+
+void disconnectClient(clients_db *db, int index)
+{
+    char debugMessage[60] = {'\0'};
+    sprintf(debugMessage, "Client %s pasa a l'estat DISCONNECTED", db->clients[index].id);
+    debugPrint(debugMessage);
+    db->clients[index].state = DISCONNECTED;
+    memset(&(db->clients[index].elems), '\0', sizeof((db->clients[index].elems)));
+    strcpy(db->clients[index].randNum, "00000000");
+    db->clients[index].tcpPort = -1;
+    db->clients[index].lastAlive = -1;
+}
+
+int shareClientsInfo(clients_db *db)
+{
+    int shmid;
+    if ((shmid = shmget(IPC_PRIVATE, db->length * sizeof(client_info), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR)) == -1)
+        return -1;
+    client_info *tmp;
+    if ((tmp = shmat(shmid, (void *)0, 0)) == (void *)-1)
+        return -1;
+    for (int i = 0; i < db->length; i++)
+        tmp[i] = db->clients[i];
+    free(db->clients);
+    db->clients = tmp;
+    return 0;
 }
 
 /*--------------------------------------------*/

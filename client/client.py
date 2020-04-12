@@ -9,8 +9,6 @@ signal.signal(signal.SIGTSTP, signal.SIG_IGN)
 # --------------------------------------------------------------
 # --------------------- FASE DE REGISTRE -----------------------
 # --------------------------------------------------------------
-
-
 def register(sock, server_address):
     global client
     client.register_attemps += 1
