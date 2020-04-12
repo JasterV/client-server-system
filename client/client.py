@@ -9,6 +9,8 @@ signal.signal(signal.SIGTSTP, signal.SIG_IGN)
 # --------------------------------------------------------------
 # --------------------- FASE DE REGISTRE -----------------------
 # --------------------------------------------------------------
+
+
 def register(sock, server_address):
     global client
     client.register_attemps += 1
@@ -217,18 +219,24 @@ def run_send(sock, cmd):
         (inputs, _, _) = select.select([sock], [], [], timeout)
         if len(inputs) > 0:
             response = recv(sock)
-            pck = response[0]
-            client_id = response[-1]
-            if client.check_server_credentials(server_id=response[1], rand_num=response[2]) and client_id == client.id:
-                if pck == DATA_ACK:
-                    logger.debug_print("\tDades acceptades!")
-                elif pck == DATA_NACK:
-                    logger.debug_print(
-                        "\tDades no acceptades, proba a reenviarles")
+            if response is not None:
+                pck = response[0]
+                client_id = response[-1]
+                if client.check_server_credentials(server_id=response[1], rand_num=response[2]) and client_id == client.id:
+                    if pck == DATA_ACK:
+                        logger.debug_print("\tDades acceptades!")
+                    elif pck == DATA_NACK:
+                        logger.debug_print(
+                            "\tDades no acceptades, proba a reenviarles")
+                    else:
+                        client.current_state = NOT_REGISTERED
                 else:
+                    logger.debug_print("\tDades no acceptades, proba a reenviarles")
                     client.current_state = NOT_REGISTERED
             else:
-                client.current_state = NOT_REGISTERED
+                logger.debug_print("\tDades no acceptades, proba a reenviarles")
+        else:
+            logger.debug_print("\tDades no acceptades, proba a reenviarles")
 
 
 def get_actual_date():

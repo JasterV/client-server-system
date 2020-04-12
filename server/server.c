@@ -1,7 +1,6 @@
 #include "utils.h"
 
 void handler(int sig);
-/* REGISTRATION FUNCTIONS */
 void attendRegisters(int socket);
 void *handlePdu(void *args);
 void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, int clientIndex);
@@ -9,10 +8,11 @@ void waitInfo(int sock, int clientIndex);
 void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, int clientIndex);
 int validInfo(const char *id, const char *randNum, int tcpPort, char *elems, client_info client);
 int validElems(char *elems);
-/* SEND ALIVE FUNCTIONS */
 void handleAlive(int sock, udp_pdu pdu, struct sockaddr_in clientAddress, int clientIndex);
 int validAlive(udp_pdu pdu, client_info client);
 void controlAlives();
+void tcpConnections(int tcpSocket);
+void *handleTcpConnection(void *args);
 
 config cfg;     /* Configuració del servidor */
 clients_db cdb; /* Base de dades */
@@ -62,23 +62,20 @@ int main(int argc, char const *argv[])
     check(bindTo(udpSocket, htons(cfg.udpPort), &udpAddress), "Error al bind del udpSocket");
     check((tcpSocket = socket(AF_INET, SOCK_STREAM, 0)), "Error al connectar el socket tcp.\n");
     check(bindTo(tcpSocket, htons(cfg.tcpPort), &tcpAddress), "Error al bind del tcpSocket");
-    
     pid_t regAtt, alives, waitConn, cli;
     if ((regAtt = fork()) == 0)
         attendRegisters(udpSocket);
     if ((alives = fork()) == 0)
         controlAlives();
     if ((waitConn = fork()) == 0)
-    {
-        while (1)
-            ;
-    }
+        tcpConnections(tcpSocket);
     if ((cli = fork()) == 0)
     {
         while (1)
             ;
     }
-    if(cli == -1 || waitConn == -1 || alives == -1 || regAtt == -1){
+    if (cli == -1 || waitConn == -1 || alives == -1 || regAtt == -1)
+    {
         perror("Error realitzant un fork al procés principal\n");
         kill(-getpid(), SIGINT);
     }
@@ -90,11 +87,34 @@ int main(int argc, char const *argv[])
     kill(-getpid(), SIGINT);
 }
 
+/*--------------------------------------------------*/
+/*-------------- HANDLE TCP CONNECTIONS ------------*/
+/*--------------------------------------------------*/
+void tcpConnections(int tcpSocket)
+{
+    check(listen(tcpSocket, SERVER_BACKLOG), "Error escoltant per el port tcp\n");
+    while (1)
+    {
+        int clientSocket;
+        pthread_t newThread;
+        check((clientSocket = accept(tcpSocket, NULL, NULL)), "Ha hagut un error al acceptar un socket, el màxim permes està definit a la llibreria 'utils.h'\n");
+        check(pthread_create(&newThread, NULL, handleTcpConnection, &clientSocket), "Error creating a thread");
+        check(pthread_detach(newThread), "Error detaching a thread");
+    }
+}
+void *handleTcpConnection(void *args)
+{
+    int clientSocket = *((int *)args);
+    tcp_pdu pdu;
+    check(recv(clientSocket, &pdu, sizeof(tcp_pdu), 0), "Error rebent informació del client\n");
+    printf("Client tcp data: %s\n", pdu.data);
+    close(clientSocket);
+    return NULL;
+}
 
 /*--------------------------------------------------*/
 /*-------------- CONTROL ALIVE CLIENTS -------------*/
 /*--------------------------------------------------*/
-
 void controlAlives()
 {
     while (1)
@@ -108,11 +128,17 @@ void controlAlives()
                 if (cdb.clients[i].state == REGISTERED)
                 {
                     if (diff >= 3)
+                    {
+                        char debugMessage[60] = {'\0'};
+                        sprintf(debugMessage, "No s'ha rebut el primer ALIVE del client %s", cdb.clients[i].id);
+                        debugPrint(debugMessage);
                         disconnectClient(&cdb, i);
+                    }
                 }
                 else if (cdb.clients[i].state == SEND_ALIVE)
                 {
-                    if (diff >= 6){
+                    if (diff >= 6)
+                    {
                         char debugMessage[60] = {'\0'};
                         sprintf(debugMessage, "El client %s no ha enviat 3 ALIVES consecutius", cdb.clients[i].id);
                         debugPrint(debugMessage);
@@ -256,7 +282,8 @@ void handleAlive(int sock, udp_pdu pdu, struct sockaddr_in clientAddress, int cl
         {
             cdb.clients[clientIndex].lastAlive = time(NULL);
             check(sendPduTo(sock, ALIVE, cfg.id, cdb.clients[clientIndex].randNum, cdb.clients[clientIndex].id, clientAddress), "Error enviant ALIVE\n");
-            if (cdb.clients[clientIndex].state == REGISTERED){
+            if (cdb.clients[clientIndex].state == REGISTERED)
+            {
                 char debugMessage[60] = {'\0'};
                 sprintf(debugMessage, "Client %s pasa a l'estat SEND_ALIVE", cdb.clients[clientIndex].id);
                 debugPrint(debugMessage);

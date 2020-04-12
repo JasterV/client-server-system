@@ -77,9 +77,11 @@ class Logger:
 
 
 def unpack_response(fmt, response):
-    t = struct.unpack(fmt, response)
-    return tuple(x if isinstance(x, int) else x.split(b'\x00')[0].decode() for x in t)
-
+    try:
+        t = struct.unpack(fmt, response)
+        return tuple(x if isinstance(x, int) else x.split(b'\x00')[0].decode() for x in t)
+    except:
+        return None
 # UDP SEND/RECV
 
 
