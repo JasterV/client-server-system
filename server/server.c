@@ -3,17 +3,17 @@
 void handler(int sig);
 void attendClient(int socket);
 void *handlePdu(void *args);
-void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, int clientIndex);
-void waitInfo(int sock, int clientIndex);
-void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, int clientIndex);
-int validInfo(const char *id, const char *randNum, int tcpPort, char *elems, client_info client);
+void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, client_info *client);
+void waitInfo(int sock, client_info *client);
+void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, client_info *client);
+int validInfo(const char *id, const char *randNum, int tcpPort, char *elems, client_info *client);
 int validElems(char *elems);
-void handleAlive(int sock, udp_pdu pdu, struct sockaddr_in clientAddress, int clientIndex);
-int validAlive(udp_pdu pdu, client_info client);
+void handleAlive(int sock, udp_pdu pdu, struct sockaddr_in clientAddress, client_info *client);
+int validAlive(udp_pdu pdu, client_info *client);
 void controlAlives();
 void tcpConnections(int tcpSocket);
 void *handleTcpConnection(void *args);
-int validCredentials(tcp_pdu pdu, client_info client);
+int validCredentials(tcp_pdu pdu, client_info *client);
 int storeData(const char *pack, const char *clientId, const char *elem, const char *value, const char *date);
 
 config cfg;     /* Configuració del servidor */
@@ -116,38 +116,40 @@ void *handleTcpConnection(void *args)
         check(recv(clientSocket, &pdu, sizeof(tcp_pdu), 0), "Error rebent informació del client\n");
         if (pdu.pack == SEND_DATA)
         {
-            if ((clientIndex = isAuthorized(&cdb, pdu.id)) != -1 && validCredentials(pdu, cdb.clients[clientIndex]))
+            if ((clientIndex = isAuthorized(&cdb, pdu.id)) != -1)
             {
-                client_info client = cdb.clients[clientIndex];
-                if (client.state == SEND_ALIVE)
+                client_info *client = &(cdb.clients[clientIndex]);
+                if (validCredentials(pdu, client))
                 {
-                    if (hasElem(pdu.elem, client))
+                    if (client->state == SEND_ALIVE)
                     {
-                        int dataStored = storeData("SEND_DATA", client.id, pdu.elem, pdu.value, pdu.data);
-                        if (dataStored == 0)
-                            check(sendTcp(clientSocket, DATA_ACK, cfg.id, client.randNum, pdu.elem, pdu.value, client.id), "Error en l'enviament de DATA_ACK\n");
+                        if (hasElem(pdu.elem, client))
+                        {
+                            int dataStored = storeData("SEND_DATA", client->id, pdu.elem, pdu.value, pdu.data);
+                            if (dataStored == 0)
+                                check(sendTcp(clientSocket, DATA_ACK, cfg.id, client->randNum, pdu.elem, pdu.value, client->id), "Error en l'enviament de DATA_ACK\n");
+                            else
+                                check(sendTcp(clientSocket, DATA_NACK, cfg.id, client->randNum, pdu.elem, pdu.value, "No s'han pogut emmagatzemar les dades al servidor"), "Error enviant DATA_NACK\n");
+                        }
                         else
-                            check(sendTcp(clientSocket, DATA_NACK, cfg.id, client.randNum, pdu.elem, pdu.value, "No s'han pogut emmagatzemar les dades al servidor"), "Error enviant DATA_NACK\n");
+                            check(sendTcp(clientSocket, DATA_NACK, cfg.id, client->randNum, pdu.elem, pdu.value, "L'element no es troba en el dispositiu"), "Error enviant DATA_NACK\n");
                     }
                     else
-                        check(sendTcp(clientSocket, DATA_NACK, cfg.id, client.randNum, pdu.elem, pdu.value, "L'element no es troba en el dispositiu"), "Error enviant DATA_NACK\n");
+                        disconnectClient(client);
                 }
                 else
-                    disconnectClient(&cdb, clientIndex);
+                {
+                    check(sendTcp(clientSocket, DATA_REJ, cfg.id, pdu.randNum, pdu.elem, pdu.value, ""), "Error enviant DATA_REJ\n");
+                    disconnectClient(client);
+                }
             }
             else
             {
                 check(sendTcp(clientSocket, DATA_REJ, cfg.id, pdu.randNum, pdu.elem, pdu.value, ""), "Error enviant DATA_REJ\n");
-                disconnectClient(&cdb, clientIndex);
             }
         }
     }
     return NULL;
-}
-
-int validCredentials(tcp_pdu pdu, client_info client)
-{
-    return strcmp(pdu.randNum, client.randNum) == 0;
 }
 
 /*--------------------------------------------------*/
@@ -160,27 +162,28 @@ void controlAlives()
         time_t now = time(NULL);
         for (int i = 0; i < cdb.length; i++)
         {
-            if (cdb.clients[i].lastAlive != -1)
+            client_info *client = &(cdb.clients[i]);
+            if (client->lastAlive != -1)
             {
-                time_t diff = difftime(now, cdb.clients[i].lastAlive);
-                if (cdb.clients[i].state == REGISTERED)
+                time_t diff = difftime(now, client->lastAlive);
+                if (client->state == REGISTERED)
                 {
-                    if (diff >= RECV_FIRST_ALIVE)
+                    if (diff >= FIRST_ALIVE_TIMEOUT)
                     {
                         char debugMessage[60] = {'\0'};
-                        sprintf(debugMessage, "No s'ha rebut el primer ALIVE del client %s", cdb.clients[i].id);
+                        sprintf(debugMessage, "No s'ha rebut el primer ALIVE del client %s", client->id);
                         debugPrint(debugMessage);
-                        disconnectClient(&cdb, i);
+                        disconnectClient(client);
                     }
                 }
-                else if (cdb.clients[i].state == SEND_ALIVE)
+                else if (client->state == SEND_ALIVE)
                 {
-                    if (diff >= RECV_ALIVE * 3)
+                    if (diff >= ALIVE_TIMEOUT * 3)
                     {
                         char debugMessage[60] = {'\0'};
-                        sprintf(debugMessage, "El client %s no ha enviat 3 ALIVES consecutius", cdb.clients[i].id);
+                        sprintf(debugMessage, "El client %s no ha enviat 3 ALIVES consecutius", client->id);
                         debugPrint(debugMessage);
-                        disconnectClient(&cdb, i);
+                        disconnectClient(client);
                     }
                 }
             }
@@ -214,10 +217,11 @@ void *handlePdu(void *args)
     int clientIndex;
     if ((clientIndex = isAuthorized(&cdb, pdu.id)) > -1)
     {
+        client_info *client = &(cdb.clients[clientIndex]);
         if (pdu.pack == REG_REQ)
-            registerClient(attSocket, pdu, clientAddress, clientIndex);
+            registerClient(attSocket, pdu, clientAddress, client);
         else if (pdu.pack == ALIVE)
-            handleAlive(attSocket, pdu, clientAddress, clientIndex);
+            handleAlive(attSocket, pdu, clientAddress, client);
     }
     else
         check(sendUdp(attSocket, REG_REJ, cfg.id, "00000000", "Dispositiu no autoritzat en el sistema", clientAddress), "Error enviant REG_REJ\n");
@@ -227,18 +231,18 @@ void *handlePdu(void *args)
 /*--------------------------------------------------*/
 /*----------------- REGISTER CLIENTS ---------------*/
 /*--------------------------------------------------*/
-void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, int clientIndex)
+void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, client_info *client)
 {
     /* COMPROVEM LES DADES DE LA PDU I DEL CLIENT */
     if (strcmp(pdu.randNum, "00000000") != 0 || strcmp(pdu.data, "") != 0)
     {
-        disconnectClient(&cdb, clientIndex);
+        disconnectClient(client);
         check(sendUdp(sock, REG_REJ, cfg.id, "00000000", "Dades incorrectes", address), "Error enviant REG_REJ\n");
         return;
     }
-    if (cdb.clients[clientIndex].state != DISCONNECTED)
+    if (client->state != DISCONNECTED)
     {
-        disconnectClient(&cdb, clientIndex);
+        disconnectClient(client);
         return;
     }
     char randNum[9] = {'\0'}, data[61] = {'\0'}, debugMessage[60] = {'\0'};
@@ -249,19 +253,17 @@ void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, int clien
     check((newSocket = socket(AF_INET, SOCK_DGRAM, 0)), "Error al connectar el socket udp.\n");
     check(bindTo(newSocket, 0, &newAddress), "Error al bind del udpSocket");
     check((port = getPort(newSocket)), "Error agafant port\n");
-    /* ENVIEM REG_ACK */
     sprintf(data, "%d", port);
     check(sendUdp(newSocket, REG_ACK, cfg.id, randNum, data, address), "Error enviant REG_ACK\n");
-    cdb.clients[clientIndex].state = WAIT_INFO;
-    strcpy(cdb.clients[clientIndex].randNum, randNum);
-    /* COMENCEM PROCÉS INFO */
-    sprintf(debugMessage, "Client %s pasa a l'estat WAIT_INFO", cdb.clients[clientIndex].id);
+    sprintf(debugMessage, "Client %s pasa a l'estat WAIT_INFO", client->id);
     debugPrint(debugMessage);
-    waitInfo(newSocket, clientIndex);
+    client->state = WAIT_INFO;
+    strcpy((client->randNum), randNum);
+    waitInfo(newSocket, client);
     close(newSocket);
 }
 
-void waitInfo(int sock, int clientIndex)
+void waitInfo(int sock, client_info *client)
 {
     fd_set inputs;
     check(selectIn(sock, &inputs, INFO_WAIT_TIME), "Error en el select\n");
@@ -273,65 +275,65 @@ void waitInfo(int sock, int clientIndex)
         memset(&info, 0, sizeof(udp_pdu));
         check(recvfrom(sock, &info, sizeof(udp_pdu), 0, (struct sockaddr *)&infoAddress, &len), "Error al rebre l'informació");
         if (info.pack == REG_INFO)
-            handleClientInfo(sock, info, infoAddress, clientIndex);
+            handleClientInfo(sock, info, infoAddress, client);
         else
-            disconnectClient(&cdb, clientIndex);
+            disconnectClient(client);
     }
     else
-        disconnectClient(&cdb, clientIndex);
+        disconnectClient(client);
 }
 
-void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, int clientIndex)
+void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, client_info *client)
 {
     int tcpPort = atoi(strtok(info.data, ","));
     char *elems = strtok(NULL, ",");
-    if (validInfo(info.id, info.randNum, tcpPort, elems, cdb.clients[clientIndex]))
+    if (validInfo(info.id, info.randNum, tcpPort, elems, client))
     {
         char data[6], debugMessage[60] = {'\0'};
         sprintf(data, "%d", cfg.tcpPort);
-        check(sendUdp(sock, INFO_ACK, cfg.id, cdb.clients[clientIndex].randNum, data, clientAddress), "Error enviant INFO_NACK\n");
+        check(sendUdp(sock, INFO_ACK, cfg.id, client->randNum, data, clientAddress), "Error enviant INFO_NACK\n");
         /* Registrem les dades del client */
-        cdb.clients[clientIndex].tcpPort = tcpPort;
-        strcpy(cdb.clients[clientIndex].elems, elems);
-        cdb.clients[clientIndex].lastAlive = time(NULL);
-        cdb.clients[clientIndex].state = REGISTERED;
-        sprintf(debugMessage, "Client %s pasa a l'estat REGISTERED", cdb.clients[clientIndex].id);
+        strcpy((client->elems), elems);
+        client->tcpPort = tcpPort;
+        client->lastAlive = time(NULL);
+        client->state = REGISTERED;
+        sprintf(debugMessage, "Client %s pasa a l'estat REGISTERED", client->id);
         debugPrint(debugMessage);
     }
     else
     {
-        check(sendUdp(sock, INFO_NACK, cfg.id, cdb.clients[clientIndex].randNum, "Dades incorrectes\n", clientAddress), "Error enviant INFO_NACK\n");
-        disconnectClient(&cdb, clientIndex);
+        check(sendUdp(sock, INFO_NACK, cfg.id, client->randNum, "Dades incorrectes\n", clientAddress), "Error enviant INFO_NACK\n");
+        disconnectClient(client);
     }
 }
 
 /*--------------------------------------------------*/
 /*----------------- SEND ALIVES --------------------*/
 /*--------------------------------------------------*/
-void handleAlive(int sock, udp_pdu pdu, struct sockaddr_in clientAddress, int clientIndex)
+void handleAlive(int sock, udp_pdu pdu, struct sockaddr_in clientAddress, client_info *client)
 {
-    if (cdb.clients[clientIndex].state == REGISTERED || cdb.clients[clientIndex].state == SEND_ALIVE)
+    if (client->state == REGISTERED || client->state == SEND_ALIVE)
     {
-        if (validAlive(pdu, cdb.clients[clientIndex]))
+        if (validAlive(pdu, client))
         {
-            cdb.clients[clientIndex].lastAlive = time(NULL);
-            check(sendUdp(sock, ALIVE, cfg.id, cdb.clients[clientIndex].randNum, cdb.clients[clientIndex].id, clientAddress), "Error enviant ALIVE\n");
-            if (cdb.clients[clientIndex].state == REGISTERED)
+            client->lastAlive = time(NULL);
+            check(sendUdp(sock, ALIVE, cfg.id, client->randNum, client->id, clientAddress), "Error enviant ALIVE\n");
+            if (client->state == REGISTERED)
             {
                 char debugMessage[60] = {'\0'};
-                sprintf(debugMessage, "Client %s pasa a l'estat SEND_ALIVE", cdb.clients[clientIndex].id);
+                sprintf(debugMessage, "Client %s pasa a l'estat SEND_ALIVE", client->id);
                 debugPrint(debugMessage);
-                cdb.clients[clientIndex].state = SEND_ALIVE;
+                client->state = SEND_ALIVE;
             }
         }
         else
         {
-            check(sendUdp(sock, ALIVE_REJ, cfg.id, cdb.clients[clientIndex].randNum, "Dades del paquet ALIVE incorrectes\n", clientAddress), "Error enviant ALIVE_REJ\n");
-            disconnectClient(&cdb, clientIndex);
+            check(sendUdp(sock, ALIVE_REJ, cfg.id, client->randNum, "Dades del paquet ALIVE incorrectes\n", clientAddress), "Error enviant ALIVE_REJ\n");
+            disconnectClient(client);
         }
     }
     else
-        disconnectClient(&cdb, clientIndex);
+        disconnectClient(client);
 }
 
 /*-------------------------------------------------*/
@@ -346,7 +348,8 @@ void handler(int sig)
     exit(EXIT_SUCCESS);
 }
 
-int storeData(const char *pack, const char *clientId, const char *elem, const char *value, const char *date)
+int storeData(const char *pack, const char *clientId,
+              const char *elem, const char *value, const char *date)
 {
     char filename[17] = {'\0'};
     sprintf(filename, "%s.data", clientId);
@@ -359,18 +362,25 @@ int storeData(const char *pack, const char *clientId, const char *elem, const ch
     return 0;
 }
 
-int validAlive(udp_pdu pdu, client_info client)
+int validAlive(udp_pdu pdu, client_info *client)
 {
-    return strcmp(pdu.id, client.id) == 0 && strcmp(pdu.randNum, client.randNum) == 0 && strcmp(pdu.data, "") == 0;
+    return strcmp(pdu.id, client->id) == 0 &&
+           strcmp(pdu.randNum, client->randNum) == 0 &&
+           strcmp(pdu.data, "") == 0;
 }
 
-int validInfo(const char *id, const char *randNum, int tcpPort, char *elems, client_info client)
+int validInfo(const char *id, const char *randNum, int tcpPort, char *elems, client_info *client)
 {
-    return strcmp(id, client.id) == 0 &&
-           strcmp(randNum, client.randNum) == 0 &&
+    return strcmp(id, client->id) == 0 &&
+           strcmp(randNum, client->randNum) == 0 &&
            tcpPort >= 1024 &&
            tcpPort <= 65535 &&
            validElems(elems);
+}
+
+int validCredentials(tcp_pdu pdu, client_info *client)
+{
+    return strcmp(pdu.randNum, client->randNum) == 0;
 }
 
 int validElems(char *elems)

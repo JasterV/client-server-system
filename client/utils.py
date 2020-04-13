@@ -60,7 +60,6 @@ m = 3.0
 class Logger:
     def __init__(self):
         self.debug_mode = False
-        super().__init__()
 
     def turn_debug_on(self):
         self.debug_mode = True
@@ -82,7 +81,7 @@ def unpack_response(fmt, response):
         return tuple(x if isinstance(x, int) else x.split(b'\x00')[0].decode() for x in t)
     except:
         # Considerem un error en el desenpaquetament si
-        # servidor ens ha enviat un paquet mal format i
+        # el servidor ens ha enviat un paquet mal format i
         # retornem null
         return None
 

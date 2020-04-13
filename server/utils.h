@@ -25,8 +25,8 @@
 #define SERVER_BACKLOG 100
 #define INFO_WAIT_TIME 2
 #define TCP_WAIT_TIME 3
-#define RECV_FIRST_ALIVE 3
-#define RECV_ALIVE 2
+#define FIRST_ALIVE_TIMEOUT 3
+#define ALIVE_TIMEOUT 2
 /*--------------TIPUS DE PAQUETS-------------*/
 
 /* Paquets de la fase de registre */
@@ -149,16 +149,16 @@ int isAuthorized(clients_db *db, const char *id)
     return -1;
 }
 
-void disconnectClient(clients_db *db, int index)
+void disconnectClient(client_info *client)
 {
     char debugMessage[60] = {'\0'};
-    sprintf(debugMessage, "Client %s pasa a l'estat DISCONNECTED", db->clients[index].id);
+    sprintf(debugMessage, "Client %s pasa a l'estat DISCONNECTED", client->id);
     debugPrint(debugMessage);
-    db->clients[index].state = DISCONNECTED;
-    memset(&(db->clients[index].elems), '\0', sizeof((db->clients[index].elems)));
-    strcpy(db->clients[index].randNum, "00000000");
-    db->clients[index].tcpPort = -1;
-    db->clients[index].lastAlive = -1;
+    client->state = DISCONNECTED;
+    memset(&(client->elems), '\0', sizeof((client->elems)));
+    strcpy(client->randNum, "00000000");
+    client->tcpPort = -1;
+    client->lastAlive = -1;
 }
 
 int shareClientsInfo(clients_db *db)
@@ -176,10 +176,10 @@ int shareClientsInfo(clients_db *db)
     return 0;
 }
 
-int hasElem(const char *elem, client_info client)
+int hasElem(const char *elem, client_info *client)
 {
     char cpy[50] = {'\0'};
-    strcpy(cpy, client.elems);
+    strcpy(cpy, client->elems);
     char *token = strtok(cpy, ";");
     while (token != NULL)
     {

@@ -262,19 +262,24 @@ def wait_server_connections(sock):
         if len(inputs) > 0:
             new_sock, addr = sock.accept()
             response = recv(new_sock)
-            pck, client_id, elem = response[0], response[-1], response[3]
-            if client.check_server_credentials(server_id=response[1], rand_num=response[2]) and client_id == client.id:
-                if elem not in client.elems:
-                    send(new_sock, DATA_NACK, client.id,
-                         client.rand_num, elem, "", "Element no trobat")
-                if pck == SET_DATA:
-                    value = response[4]
-                    set_data(new_sock, elem, value)
-                elif pck == GET_DATA:
-                    get_data(new_sock, elem)
+            if response is not None:
+                pck, client_id, elem = response[0], response[-1], response[3]
+                if client.check_server_credentials(server_id=response[1], rand_num=response[2]) and client_id == client.id:
+                    if elem not in client.elems:
+                        send(new_sock, DATA_NACK, client.id,
+                            client.rand_num, elem, "", "Element no trobat")
+                    if pck == SET_DATA:
+                        value = response[4]
+                        set_data(new_sock, elem, value)
+                    elif pck == GET_DATA:
+                        get_data(new_sock, elem)
+                else:
+                    send(new_sock, DATA_REJ, client.id, client.rand_num, elem, "",
+                        "Hi ha discrepancies en les dades del servidor i/o del dispositiu")
+                    client.current_state = NOT_REGISTERED
             else:
                 send(new_sock, DATA_REJ, client.id, client.rand_num, elem, "",
-                     "Hi ha discrepancies en les dades del servidor i/o del dispositiu")
+                        "Les dades rebudes estan mal formades")
                 client.current_state = NOT_REGISTERED
             new_sock.close()
     sock.close()
