@@ -14,6 +14,7 @@ void controlAlives();
 void tcpConnections(int tcpSocket);
 void *handleTcpConnection(void *args);
 int validCredentials(tcp_pdu pdu, client_info client);
+int storeData(const char *pack, const char *clientId, const char *elem, const char *value);
 
 config cfg;     /* Configuració del servidor */
 clients_db cdb; /* Base de dades */
@@ -56,7 +57,7 @@ int main(int argc, char const *argv[])
     check(readDb(&cdb, dbname),
           "Error llegint el fitxer de dispositius.\n");
     check(shareClientsInfo(&cdb), "Error compartint memoria\n");
-    
+
     int udpSocket, tcpSocket;
     struct sockaddr_in tcpAddress, udpAddress;
     check((udpSocket = socket(AF_INET, SOCK_DGRAM, 0)), "Error al connectar el socket udp.\n");
@@ -122,8 +123,11 @@ void *handleTcpConnection(void *args)
                 {
                     if (hasElem(pdu.elem, client))
                     {
-
-                        check(sendTcp(clientSocket, DATA_ACK, cfg.id, client.randNum, pdu.elem, pdu.value, client.id), "Error en l'enviament de DATA_ACK\n");
+                        int dataStored = storeData("SEND_DATA", client.id, pdu.elem, pdu.value);
+                        if (dataStored == -1)
+                            check(sendTcp(clientSocket, DATA_NACK, cfg.id, client.randNum, pdu.elem, pdu.value, "No s'han pogut emmagatzemar les dades al servidor"), "Error enviant DATA_NACK\n");
+                        else
+                            check(sendTcp(clientSocket, DATA_ACK, cfg.id, client.randNum, pdu.elem, pdu.value, client.id), "Error en l'enviament de DATA_ACK\n");
                     }
                     else
                         check(sendTcp(clientSocket, DATA_NACK, cfg.id, client.randNum, pdu.elem, pdu.value, "L'element no es troba en el dispositiu"), "Error enviant DATA_NACK\n");
@@ -162,7 +166,7 @@ void controlAlives()
                 time_t diff = difftime(now, cdb.clients[i].lastAlive);
                 if (cdb.clients[i].state == REGISTERED)
                 {
-                    if (diff >= 3)
+                    if (diff >= RECV_FIRST_ALIVE)
                     {
                         char debugMessage[60] = {'\0'};
                         sprintf(debugMessage, "No s'ha rebut el primer ALIVE del client %s", cdb.clients[i].id);
@@ -172,7 +176,7 @@ void controlAlives()
                 }
                 else if (cdb.clients[i].state == SEND_ALIVE)
                 {
-                    if (diff >= 6)
+                    if (diff >= RECV_ALIVE * 3)
                     {
                         char debugMessage[60] = {'\0'};
                         sprintf(debugMessage, "El client %s no ha enviat 3 ALIVES consecutius", cdb.clients[i].id);
@@ -284,9 +288,10 @@ void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, 
     char *elems = strtok(NULL, ",");
     if (validInfo(info.id, info.randNum, tcpPort, elems, cdb.clients[clientIndex]))
     {
-        char tcp_port[6], debugMessage[60] = {'\0'};
-        sprintf(tcp_port, "%d", cfg.tcpPort);
-        check(sendUdp(sock, INFO_ACK, cfg.id, cdb.clients[clientIndex].randNum, tcp_port, clientAddress), "Error enviant INFO_NACK\n");
+        char data[6], debugMessage[60] = {'\0'};
+        sprintf(data, "%d", cfg.tcpPort);
+        check(sendUdp(sock, INFO_ACK, cfg.id, cdb.clients[clientIndex].randNum, data, clientAddress), "Error enviant INFO_NACK\n");
+        /* Registrem les dades del client */
         cdb.clients[clientIndex].tcpPort = tcpPort;
         strcpy(cdb.clients[clientIndex].elems, elems);
         cdb.clients[clientIndex].lastAlive = time(NULL);
@@ -340,6 +345,21 @@ void handler(int sig)
         ;
     shmdt(cdb.clients);
     exit(EXIT_SUCCESS);
+}
+
+int storeData(const char *pack, const char *clientId, const char *elem, const char *value)
+{
+    char filename[17] = {'\0'};
+    sprintf(filename, "%s.data", clientId);
+    FILE *fp = fopen(filename, "a");
+    if (fp == NULL)
+        return -1;
+    time_t t = time(NULL);
+    struct tm *date = localtime(&t);
+    if (fprintf(fp, "%d-%d-%d;%s;SEND_DATA;%s;%s\n", date->tm_year + 1900, date->tm_mon + 1, date->tm_mday, __TIME__, elem, value) == -1)
+        return -1;
+    fflush(fp);
+    return 0;
 }
 
 int validAlive(udp_pdu pdu, client_info client)

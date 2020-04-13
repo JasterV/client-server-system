@@ -25,6 +25,8 @@
 #define SERVER_BACKLOG 100
 #define INFO_WAIT_TIME 2
 #define TCP_WAIT_TIME 3
+#define RECV_FIRST_ALIVE 3
+#define RECV_ALIVE 2
 /*--------------TIPUS DE PAQUETS-------------*/
 
 /* Paquets de la fase de registre */
