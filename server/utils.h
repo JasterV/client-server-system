@@ -24,6 +24,7 @@
 
 #define SERVER_BACKLOG 100
 #define INFO_WAIT_TIME 2
+#define TCP_WAIT_TIME 3
 /*--------------TIPUS DE PAQUETS-------------*/
 
 /* Paquets de la fase de registre */
@@ -173,10 +174,24 @@ int shareClientsInfo(clients_db *db)
     return 0;
 }
 
+int hasElem(const char *elem, client_info client)
+{
+    char cpy[50] = {'\0'};
+    strcpy(cpy, client.elems);
+    char *token = strtok(cpy, ";");
+    while (token != NULL)
+    {
+        if (strcmp(elem, token) == 0)
+            return 1;
+        token = strtok(NULL, ";");
+    }
+    return 0;
+}
+
 /*--------------------------------------------*/
 /*---------------SOCKETS UTILS----------------*/
 /*--------------------------------------------*/
-int sendPduTo(int sock, unsigned char pack, char id[13], char randNum[9], char data[61], struct sockaddr_in address)
+int sendUdp(int sock, unsigned char pack, char id[13], char randNum[9], char data[61], struct sockaddr_in address)
 {
     udp_pdu pdu;
     pdu.pack = pack;
@@ -184,6 +199,28 @@ int sendPduTo(int sock, unsigned char pack, char id[13], char randNum[9], char d
     strcpy(pdu.randNum, randNum);
     strcpy(pdu.data, data);
     return sendto(sock, &pdu, sizeof(udp_pdu), 0, (struct sockaddr *)&address, sizeof(struct sockaddr_in));
+}
+
+int sendTcp(int sock, unsigned char pack, char id[13], char randNum[9], char elem[8], char value[16], char info[80])
+{
+    tcp_pdu pdu;
+    pdu.pack = pack;
+    strcpy(pdu.id, id);
+    strcpy(pdu.randNum, randNum);
+    strcpy(pdu.elem, elem);
+    strcpy(pdu.value, value);
+    strcpy(pdu.data, info);
+    return send(sock, &pdu, sizeof(tcp_pdu), 0);
+}
+
+int selectIn(int sock, fd_set *inputs, int timeout)
+{
+    struct timeval t;
+    t.tv_sec = timeout;
+    t.tv_usec = 0;
+    FD_ZERO(inputs);
+    FD_SET(sock, inputs);
+    return select(sock + 1, inputs, NULL, NULL, &t);
 }
 
 int bindTo(int socket, uint16_t port, struct sockaddr_in *address)

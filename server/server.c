@@ -13,6 +13,7 @@ int validAlive(udp_pdu pdu, client_info client);
 void controlAlives();
 void tcpConnections(int tcpSocket);
 void *handleTcpConnection(void *args);
+int validCredentials(tcp_pdu pdu, client_info client);
 
 config cfg;     /* Configuració del servidor */
 clients_db cdb; /* Base de dades */
@@ -55,7 +56,7 @@ int main(int argc, char const *argv[])
     check(readDb(&cdb, dbname),
           "Error llegint el fitxer de dispositius.\n");
     check(shareClientsInfo(&cdb), "Error compartint memoria\n");
-
+    
     int udpSocket, tcpSocket;
     struct sockaddr_in tcpAddress, udpAddress;
     check((udpSocket = socket(AF_INET, SOCK_DGRAM, 0)), "Error al connectar el socket udp.\n");
@@ -105,11 +106,45 @@ void tcpConnections(int tcpSocket)
 void *handleTcpConnection(void *args)
 {
     int clientSocket = *((int *)args);
-    tcp_pdu pdu;
-    check(recv(clientSocket, &pdu, sizeof(tcp_pdu), 0), "Error rebent informació del client\n");
-    printf("Client tcp data: %s\n", pdu.data);
+    fd_set inputs;
+    check(selectIn(clientSocket, &inputs, TCP_WAIT_TIME), "Error en el select\n");
+    if (FD_ISSET(clientSocket, &inputs))
+    {
+        int clientIndex;
+        tcp_pdu pdu;
+        check(recv(clientSocket, &pdu, sizeof(tcp_pdu), 0), "Error rebent informació del client\n");
+        if (pdu.pack == SEND_DATA)
+        {
+            if ((clientIndex = isAuthorized(&cdb, pdu.id)) != -1 && validCredentials(pdu, cdb.clients[clientIndex]))
+            {
+                client_info client = cdb.clients[clientIndex];
+                if (client.state == SEND_ALIVE)
+                {
+                    if (hasElem(pdu.elem, client))
+                    {
+
+                        check(sendTcp(clientSocket, DATA_ACK, cfg.id, client.randNum, pdu.elem, pdu.value, client.id), "Error en l'enviament de DATA_ACK\n");
+                    }
+                    else
+                        check(sendTcp(clientSocket, DATA_NACK, cfg.id, client.randNum, pdu.elem, pdu.value, "L'element no es troba en el dispositiu"), "Error enviant DATA_NACK\n");
+                }
+                else
+                    disconnectClient(&cdb, clientIndex);
+            }
+            else
+            {
+                check(sendTcp(clientSocket, DATA_REJ, cfg.id, pdu.randNum, pdu.elem, pdu.value, ""), "Error enviant DATA_REJ\n");
+                disconnectClient(&cdb, clientIndex);
+            }
+        }
+    }
     close(clientSocket);
     return NULL;
+}
+
+int validCredentials(tcp_pdu pdu, client_info client)
+{
+    return strcmp(pdu.randNum, client.randNum) == 0;
 }
 
 /*--------------------------------------------------*/
@@ -182,7 +217,7 @@ void *handlePdu(void *args)
             handleAlive(attSocket, pdu, clientAddress, clientIndex);
     }
     else
-        check(sendPduTo(attSocket, REG_REJ, cfg.id, "00000000", "Dispositiu no autoritzat en el sistema", clientAddress), "Error enviant REG_REJ\n");
+        check(sendUdp(attSocket, REG_REJ, cfg.id, "00000000", "Dispositiu no autoritzat en el sistema", clientAddress), "Error enviant REG_REJ\n");
     return NULL;
 }
 
@@ -195,7 +230,7 @@ void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, int clien
     if (strcmp(pdu.randNum, "00000000") != 0 || strcmp(pdu.data, "") != 0)
     {
         disconnectClient(&cdb, clientIndex);
-        check(sendPduTo(sock, REG_REJ, cfg.id, "00000000", "Dades incorrectes", address), "Error enviant REG_REJ\n");
+        check(sendUdp(sock, REG_REJ, cfg.id, "00000000", "Dades incorrectes", address), "Error enviant REG_REJ\n");
         return;
     }
     if (cdb.clients[clientIndex].state != DISCONNECTED)
@@ -213,7 +248,7 @@ void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, int clien
     check((port = getPort(newSocket)), "Error agafant port\n");
     /* ENVIEM REG_ACK */
     sprintf(data, "%d", port);
-    check(sendPduTo(newSocket, REG_ACK, cfg.id, randNum, data, address), "Error enviant REG_ACK\n");
+    check(sendUdp(newSocket, REG_ACK, cfg.id, randNum, data, address), "Error enviant REG_ACK\n");
     cdb.clients[clientIndex].state = WAIT_INFO;
     strcpy(cdb.clients[clientIndex].randNum, randNum);
     /* COMENCEM PROCÉS INFO */
@@ -225,13 +260,8 @@ void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, int clien
 
 void waitInfo(int sock, int clientIndex)
 {
-    struct timeval timeout;
-    timeout.tv_sec = INFO_WAIT_TIME;
-    timeout.tv_usec = 0;
     fd_set inputs;
-    FD_ZERO(&inputs);
-    FD_SET(sock, &inputs);
-    check(select(sock + 1, &inputs, NULL, NULL, &timeout), "Error realitzant el select");
+    check(selectIn(sock, &inputs, INFO_WAIT_TIME), "Error en el select\n");
     if (FD_ISSET(sock, &inputs))
     {
         udp_pdu info;
@@ -256,7 +286,7 @@ void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, 
     {
         char tcp_port[6], debugMessage[60] = {'\0'};
         sprintf(tcp_port, "%d", cfg.tcpPort);
-        check(sendPduTo(sock, INFO_ACK, cfg.id, cdb.clients[clientIndex].randNum, tcp_port, clientAddress), "Error enviant INFO_NACK\n");
+        check(sendUdp(sock, INFO_ACK, cfg.id, cdb.clients[clientIndex].randNum, tcp_port, clientAddress), "Error enviant INFO_NACK\n");
         cdb.clients[clientIndex].tcpPort = tcpPort;
         strcpy(cdb.clients[clientIndex].elems, elems);
         cdb.clients[clientIndex].lastAlive = time(NULL);
@@ -266,7 +296,7 @@ void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, 
     }
     else
     {
-        check(sendPduTo(sock, INFO_NACK, cfg.id, cdb.clients[clientIndex].randNum, "Dades incorrectes\n", clientAddress), "Error enviant INFO_NACK\n");
+        check(sendUdp(sock, INFO_NACK, cfg.id, cdb.clients[clientIndex].randNum, "Dades incorrectes\n", clientAddress), "Error enviant INFO_NACK\n");
         disconnectClient(&cdb, clientIndex);
     }
 }
@@ -281,7 +311,7 @@ void handleAlive(int sock, udp_pdu pdu, struct sockaddr_in clientAddress, int cl
         if (validAlive(pdu, cdb.clients[clientIndex]))
         {
             cdb.clients[clientIndex].lastAlive = time(NULL);
-            check(sendPduTo(sock, ALIVE, cfg.id, cdb.clients[clientIndex].randNum, cdb.clients[clientIndex].id, clientAddress), "Error enviant ALIVE\n");
+            check(sendUdp(sock, ALIVE, cfg.id, cdb.clients[clientIndex].randNum, cdb.clients[clientIndex].id, clientAddress), "Error enviant ALIVE\n");
             if (cdb.clients[clientIndex].state == REGISTERED)
             {
                 char debugMessage[60] = {'\0'};
@@ -292,7 +322,7 @@ void handleAlive(int sock, udp_pdu pdu, struct sockaddr_in clientAddress, int cl
         }
         else
         {
-            check(sendPduTo(sock, ALIVE_REJ, cfg.id, cdb.clients[clientIndex].randNum, "Dades del paquet ALIVE incorrectes\n", clientAddress), "Error enviant ALIVE_REJ\n");
+            check(sendUdp(sock, ALIVE_REJ, cfg.id, cdb.clients[clientIndex].randNum, "Dades del paquet ALIVE incorrectes\n", clientAddress), "Error enviant ALIVE_REJ\n");
             disconnectClient(&cdb, clientIndex);
         }
     }
