@@ -219,24 +219,27 @@ def run_send(sock, cmd):
         (inputs, _, _) = select.select([sock], [], [], timeout)
         if len(inputs) > 0:
             response = recv(sock)
-            if response is not None:
-                pck = response[0]
-                client_id = response[-1]
-                if client.check_server_credentials(server_id=response[1], rand_num=response[2]) and client_id == client.id:
-                    if pck == DATA_ACK:
+            pck = response[0]
+            if client.check_server_credentials(server_id=response[1], rand_num=response[2]):
+                if pck == DATA_ACK:
+                    client_id = response[-1]
+                    if client_id == client.id:
                         logger.debug_print("\tDades acceptades!")
-                    elif pck == DATA_NACK:
-                        logger.debug_print(
-                            "\tDades no acceptades, proba a reenviarles")
                     else:
+                        logger.debug_print("\tDades d'identificació del client rebudes erronees, client passa a l'estat NOT_REGISTERED")
                         client.current_state = NOT_REGISTERED
+                elif pck == DATA_NACK:
+                    logger.debug_print(
+                        f"\tDades no acceptades, motiu: {response[-1]}")
                 else:
-                    logger.debug_print("\tDades no acceptades, proba a reenviarles")
+                    logger.debug_print(
+                        f"\tDades rebutjades per part del servidor")
                     client.current_state = NOT_REGISTERED
             else:
-                logger.debug_print("\tDades no acceptades, proba a reenviarles")
+                logger.debug_print("\tDades d'identificació del servidor rebudes erronees, client passa a l'estat NOT_REGISTERED")
+                client.current_state = NOT_REGISTERED
         else:
-            logger.debug_print("\tDades no acceptades, proba a reenviarles")
+            logger.debug_print("\tNo ha hagut una resposta per part del servidor")
 
 
 def get_actual_date():

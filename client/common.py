@@ -81,8 +81,10 @@ def unpack_response(fmt, response):
         t = struct.unpack(fmt, response)
         return tuple(x if isinstance(x, int) else x.split(b'\x00')[0].decode() for x in t)
     except:
+        # Considerem un error en el desenpaquetament com 
+        # a que el servidor ens ha enviat un paquet mal format i
+        # retornem null
         return None
-# UDP SEND/RECV
 
 
 def recvfrom(sock):
@@ -94,8 +96,6 @@ def sendto(sock, address, pack_type, client_id, rand_num, info):
     data = struct.pack('!B13s9s61s', pack_type, client_id.encode(),
                        rand_num.encode(), info.encode())
     sock.sendto(data, address)
-
-# TCP SEND/RECV
 
 
 def recv(sock):
