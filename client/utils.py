@@ -126,7 +126,6 @@ class Client():
         self.server_udp = config['Server-UDP']
         self.current_state = NOT_REGISTERED
         self.register_attemps = 0
-        super().__init__()
 
     def has_state(self, *states):
         for state in states:

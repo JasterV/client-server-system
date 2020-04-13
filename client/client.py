@@ -1,5 +1,5 @@
 #!/usr/bin/env python3.6
-from common import *
+from utils import *
 
 
 signal.signal(signal.SIGQUIT, signal.SIG_IGN)
