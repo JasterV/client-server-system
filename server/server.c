@@ -1,7 +1,7 @@
 #include "utils.h"
 
 void handler(int sig);
-void attendRegisters(int socket);
+void attendClient(int socket);
 void *handlePdu(void *args);
 void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, int clientIndex);
 void waitInfo(int sock, int clientIndex);
@@ -14,7 +14,7 @@ void controlAlives();
 void tcpConnections(int tcpSocket);
 void *handleTcpConnection(void *args);
 int validCredentials(tcp_pdu pdu, client_info client);
-int storeData(const char *pack, const char *clientId, const char *elem, const char *value);
+int storeData(const char *pack, const char *clientId, const char *elem, const char *value, const char *date);
 
 config cfg;     /* Configuració del servidor */
 clients_db cdb; /* Base de dades */
@@ -66,7 +66,7 @@ int main(int argc, char const *argv[])
     check(bindTo(tcpSocket, htons(cfg.tcpPort), &tcpAddress), "Error al bind del tcpSocket");
     pid_t regAtt, alives, waitConn, cli;
     if ((regAtt = fork()) == 0)
-        attendRegisters(udpSocket);
+        attendClient(udpSocket);
     if ((alives = fork()) == 0)
         controlAlives();
     if ((waitConn = fork()) == 0)
@@ -123,11 +123,11 @@ void *handleTcpConnection(void *args)
                 {
                     if (hasElem(pdu.elem, client))
                     {
-                        int dataStored = storeData("SEND_DATA", client.id, pdu.elem, pdu.value);
-                        if (dataStored == -1)
-                            check(sendTcp(clientSocket, DATA_NACK, cfg.id, client.randNum, pdu.elem, pdu.value, "No s'han pogut emmagatzemar les dades al servidor"), "Error enviant DATA_NACK\n");
-                        else
+                        int dataStored = storeData("SEND_DATA", client.id, pdu.elem, pdu.value, pdu.data);
+                        if (dataStored == 0)
                             check(sendTcp(clientSocket, DATA_ACK, cfg.id, client.randNum, pdu.elem, pdu.value, client.id), "Error en l'enviament de DATA_ACK\n");
+                        else
+                            check(sendTcp(clientSocket, DATA_NACK, cfg.id, client.randNum, pdu.elem, pdu.value, "No s'han pogut emmagatzemar les dades al servidor"), "Error enviant DATA_NACK\n");
                     }
                     else
                         check(sendTcp(clientSocket, DATA_NACK, cfg.id, client.randNum, pdu.elem, pdu.value, "L'element no es troba en el dispositiu"), "Error enviant DATA_NACK\n");
@@ -142,7 +142,6 @@ void *handleTcpConnection(void *args)
             }
         }
     }
-    close(clientSocket);
     return NULL;
 }
 
@@ -192,7 +191,7 @@ void controlAlives()
 /*--------------------------------------------------*/
 /*----------------- ATTEND CLIENTS -----------------*/
 /*--------------------------------------------------*/
-void attendRegisters(int socket)
+void attendClient(int socket)
 {
     reg_thread_args args;
     socklen_t len = sizeof(struct sockaddr_in);
@@ -347,16 +346,14 @@ void handler(int sig)
     exit(EXIT_SUCCESS);
 }
 
-int storeData(const char *pack, const char *clientId, const char *elem, const char *value)
+int storeData(const char *pack, const char *clientId, const char *elem, const char *value, const char *date)
 {
     char filename[17] = {'\0'};
     sprintf(filename, "%s.data", clientId);
     FILE *fp = fopen(filename, "a");
     if (fp == NULL)
         return -1;
-    time_t t = time(NULL);
-    struct tm *date = localtime(&t);
-    if (fprintf(fp, "%d-%d-%d;%s;SEND_DATA;%s;%s\n", date->tm_year + 1900, date->tm_mon + 1, date->tm_mday, __TIME__, elem, value) == -1)
+    if (fprintf(fp, "%s;%s;%s;%s\n", date, pack, elem, value) == -1)
         return -1;
     fflush(fp);
     return 0;

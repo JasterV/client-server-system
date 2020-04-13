@@ -219,21 +219,25 @@ def run_send(sock, cmd):
         (inputs, _, _) = select.select([sock], [], [], timeout)
         if len(inputs) > 0:
             response = recv(sock)
-            pck = response[0]
-            if client.check_server_credentials(server_id=response[1], rand_num=response[2]):
-                if pck == DATA_ACK:
-                    client_id = response[-1]
-                    if client_id == client.id:
-                        logger.debug_print("\tDades acceptades!")
+            if response is not None:
+                pck = response[0]
+                if client.check_server_credentials(server_id=response[1], rand_num=response[2]):
+                    if pck == DATA_ACK:
+                        client_id = response[-1]
+                        if client_id == client.id:
+                            logger.debug_print("\tDades acceptades!")
+                        else:
+                            logger.debug_print("\tDades d'identificació del client rebudes erronees, client passa a l'estat NOT_REGISTERED")
+                            client.current_state = NOT_REGISTERED
+                    elif pck == DATA_NACK:
+                        logger.debug_print(
+                            f"\tDades no acceptades, motiu: {response[-1]}")
                     else:
-                        logger.debug_print("\tDades d'identificació del client rebudes erronees, client passa a l'estat NOT_REGISTERED")
+                        logger.debug_print(
+                            f"\tDades rebutjades per part del servidor")
                         client.current_state = NOT_REGISTERED
-                elif pck == DATA_NACK:
-                    logger.debug_print(
-                        f"\tDades no acceptades, motiu: {response[-1]}")
                 else:
-                    logger.debug_print(
-                        f"\tDades rebutjades per part del servidor")
+                    logger.debug_print("\tDades d'identificació del servidor rebudes erronees, client passa a l'estat NOT_REGISTERED")
                     client.current_state = NOT_REGISTERED
             else:
                 logger.debug_print("\tDades d'identificació del servidor rebudes erronees, client passa a l'estat NOT_REGISTERED")
@@ -378,5 +382,5 @@ except OSError as err:
     print(f"OSError: {err}")
 finally:
     # Realitzem un exit el qual tanca tots els
-    # descriptors de fitxers relacionats amb el procés
+    # descriptors de fitxer relacionats amb el procés
     sys.exit(0)

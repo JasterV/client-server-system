@@ -81,8 +81,8 @@ def unpack_response(fmt, response):
         t = struct.unpack(fmt, response)
         return tuple(x if isinstance(x, int) else x.split(b'\x00')[0].decode() for x in t)
     except:
-        # Considerem un error en el desenpaquetament com 
-        # a que el servidor ens ha enviat un paquet mal format i
+        # Considerem un error en el desenpaquetament si
+        # servidor ens ha enviat un paquet mal format i
         # retornem null
         return None
 
