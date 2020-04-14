@@ -27,6 +27,7 @@
 #define TCP_WAIT_TIME 3
 #define FIRST_ALIVE_TIMEOUT 3
 #define ALIVE_TIMEOUT 2
+#define M 3
 /*--------------TIPUS DE PAQUETS-------------*/
 
 /* Paquets de la fase de registre */
@@ -66,6 +67,7 @@ typedef struct client_info
     char id[13];
     char randNum[9];
     char elems[50];
+    char ip[16];
     unsigned short tcpPort;
     time_t lastAlive;
 } client_info;
@@ -151,12 +153,16 @@ int isAuthorized(clients_db *db, const char *id)
 
 void disconnectClient(client_info *client)
 {
-    char debugMessage[60] = {'\0'};
-    sprintf(debugMessage, "Client %s pasa a l'estat DISCONNECTED", client->id);
-    debugPrint(debugMessage);
+    if (client->state != DISCONNECTED)
+    {
+        char debugMessage[60] = {'\0'};
+        sprintf(debugMessage, "Client %s pasa a l'estat DISCONNECTED", client->id);
+        debugPrint(debugMessage);
+    }
     client->state = DISCONNECTED;
-    memset(&(client->elems), '\0', sizeof((client->elems)));
-    strcpy(client->randNum, "00000000");
+    memset(client->elems, '\0', sizeof(client->elems));
+    memset(client->ip, '\0', sizeof(client->ip));
+    memset(client->randNum, '\0', sizeof(client->randNum));
     client->tcpPort = -1;
     client->lastAlive = -1;
 }
@@ -225,12 +231,22 @@ int selectIn(int sock, fd_set *inputs, int timeout)
     return select(sock + 1, inputs, NULL, NULL, &t);
 }
 
-int bindTo(int socket, uint16_t port, struct sockaddr_in *address)
+int bindTo(int sock, uint16_t port)
 {
-    address->sin_family = AF_INET;
-    address->sin_port = port;
-    address->sin_addr.s_addr = INADDR_ANY;
-    return bind(socket, (struct sockaddr *)address, sizeof(struct sockaddr_in));
+    struct sockaddr_in address;
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = INADDR_ANY;
+    return bind(sock, (struct sockaddr *)&address, sizeof(struct sockaddr_in));
+}
+
+int connectTo(int sock, const char *ip, unsigned short port)
+{
+    struct sockaddr_in address;
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = inet_addr(ip);
+    return connect(sock, (struct sockaddr *)&address, sizeof(struct sockaddr_in));
 }
 
 int getPort(int fd)
@@ -341,11 +357,13 @@ int readDb(clients_db *db, const char *filename)
         }
         client_info client;
         memset(&client, 0, sizeof(client_info));
-        strcpy(client.id, line);
         client.state = DISCONNECTED;
-        strcpy(client.randNum, "00000000");
+        strcpy(client.id, line);
+        memset(client.elems, '\0', sizeof(client.elems));
+        memset(client.ip, '\0', sizeof(client.ip));
+        memset(client.randNum, '\0', sizeof(client.randNum));
         client.tcpPort = -1;
-        client.lastAlive = (time_t)-1;
+        client.lastAlive = -1;
         clients[i] = client;
         i++;
     }

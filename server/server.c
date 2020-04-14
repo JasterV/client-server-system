@@ -1,7 +1,7 @@
 #include "utils.h"
 
 void handler(int sig);
-void attendClient(int socket);
+void attendClients(int socket);
 void *handlePdu(void *args);
 void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, client_info *client);
 void waitInfo(int sock, client_info *client);
@@ -14,7 +14,11 @@ void controlAlives();
 void tcpConnections(int tcpSocket);
 void *handleTcpConnection(void *args);
 int validCredentials(tcp_pdu pdu, client_info *client);
-int storeData(const char *pack, const char *clientId, const char *elem, const char *value, const char *date);
+int storeData(const char *pack, const char *clientId, const char *elem, const char *value);
+void startCli();
+void listClients();
+void runConnection(unsigned char pack, char *clientId, char *elemId, char *newValue);
+int isInputElem(const char *elemId);
 
 config cfg;     /* Configuració del servidor */
 clients_db cdb; /* Base de dades */
@@ -59,23 +63,19 @@ int main(int argc, char const *argv[])
     check(shareClientsInfo(&cdb), "Error compartint memoria\n");
 
     int udpSocket, tcpSocket;
-    struct sockaddr_in tcpAddress, udpAddress;
     check((udpSocket = socket(AF_INET, SOCK_DGRAM, 0)), "Error al connectar el socket udp.\n");
-    check(bindTo(udpSocket, htons(cfg.udpPort), &udpAddress), "Error al bind del udpSocket");
+    check(bindTo(udpSocket, cfg.udpPort), "Error al bind del udpSocket");
     check((tcpSocket = socket(AF_INET, SOCK_STREAM, 0)), "Error al connectar el socket tcp.\n");
-    check(bindTo(tcpSocket, htons(cfg.tcpPort), &tcpAddress), "Error al bind del tcpSocket");
+    check(bindTo(tcpSocket, cfg.tcpPort), "Error al bind del tcpSocket");
     pid_t regAtt, alives, waitConn, cli;
     if ((regAtt = fork()) == 0)
-        attendClient(udpSocket);
+        attendClients(udpSocket);
     if ((alives = fork()) == 0)
         controlAlives();
     if ((waitConn = fork()) == 0)
         tcpConnections(tcpSocket);
     if ((cli = fork()) == 0)
-    {
-        while (1)
-            ;
-    }
+        startCli();
     if (cli == -1 || waitConn == -1 || alives == -1 || regAtt == -1)
     {
         perror("Error realitzant un fork al procés principal\n");
@@ -85,8 +85,132 @@ int main(int argc, char const *argv[])
        envia una señal SIGINT a tots els 
        processos */
     wait(NULL);
-    printf("Un procés ha mort\n");
     kill(-getpid(), SIGINT);
+}
+
+/*--------------------------------------------------*/
+/*--------------------- CLI ------------------------*/
+/*--------------------------------------------------*/
+
+void startCli()
+{
+    while (1)
+    {
+        char input[100] = {'\0'};
+        char *command;
+        fgets(input, sizeof(input), stdin);
+        command = strtok(input, " \n");
+        if (command != NULL)
+        {
+            if (strcmp(command, "list") == 0)
+            {
+                listClients();
+            }
+            else if (strcmp(command, "quit") == 0)
+                exit(EXIT_SUCCESS);
+            else if (strcmp(command, "set") == 0)
+            {
+                char *clientId = strtok(NULL, " \n");
+                char *elemId = strtok(NULL, " \n");
+                char *newValue = strtok(NULL, " \n");
+                if (clientId == NULL || elemId == NULL || newValue == NULL || strtok(NULL, " \n") != NULL)
+                    printf("set <identificador_dispositiu> <identificador_element> <nou_valor>\n");
+                else
+                    runConnection(SET_DATA, clientId, elemId, newValue);
+            }
+            else if (strcmp(command, "get") == 0)
+            {
+                char *clientId = strtok(NULL, " \n");
+                char *elemId = strtok(NULL, " \n");
+                if (clientId == NULL || elemId == NULL || strtok(NULL, " \n") != NULL)
+                    printf("get <identificador_dispositiu> <identificador_element>\n");
+                else
+                    runConnection(GET_DATA, clientId, elemId, "");
+            }
+            else
+            {
+                printf("Comanda %s no reconeguda\n", command);
+            }
+        }
+    }
+}
+
+void listClients()
+{
+    printf("\n-----Id----- --RNDM-- ------ IP ----- ----ESTAT--- --ELEMENTS-------------------------------------------\n");
+    for (int i = 0; i < cdb.length; i++)
+    {
+        client_info client = cdb.clients[i];
+        const char *state = client.state == DISCONNECTED ? "DISCONNECTED" : client.state == WAIT_INFO ? "WAIT_INFO" : client.state == SEND_ALIVE ? "SEND_ALIVE" : "\0";
+        printf("%-12s %-8s %-15s %-12s %-50s\n", client.id, client.randNum, client.ip, state, client.elems);
+    }
+    printf("\n");
+}
+
+void runConnection(unsigned char pack, char *clientId, char *elemId, char *value)
+{
+    int clientIndex, sock;
+    if ((clientIndex = isAuthorized(&cdb, clientId)) > -1)
+    {
+        client_info *client = &(cdb.clients[clientIndex]);
+        if (client->state == SEND_ALIVE)
+        {
+            if (hasElem(elemId, client))
+            {
+                if (pack == SET_DATA && !isInputElem(elemId))
+                {
+                    printf("L'element %s no es un element d'entrada (actuador)\n", elemId);
+                    return;
+                }
+                check((sock = socket(AF_INET, SOCK_STREAM, 0)), "Error creant un socket\n");
+                if (connectTo(sock, client->ip, client->tcpPort) >= 0)
+                {
+                    check(sendTcp(sock, pack, cfg.id, client->randNum, elemId, value, client->id), "Error en el send\n");
+                    fd_set inputs;
+                    check(selectIn(sock, &inputs, M), "Error en el select\n");
+                    if (FD_ISSET(sock, &inputs))
+                    {
+                        tcp_pdu response;
+                        check(recv(sock, &response, sizeof(tcp_pdu), 0), "Error rebent informació\n");
+                        if (response.pack == DATA_ACK)
+                        {
+                            debugPrint("Dades acceptades");
+                            storeData(pack == SET_DATA ? "SET_DATA" : "GET_DATA", client->id, response.elem, response.value);
+                        }
+                        else if (response.pack == DATA_NACK)
+                        {
+                            debugPrint("Dades no acceptades");
+                        }
+                        else if (response.pack == DATA_REJ)
+                        {
+                            debugPrint("Dades rebutjades, client passa a l'estat DISCONNECTED");
+                            disconnectClient(client);
+                        }
+                    }
+                    else
+                        debugPrint("No s'ha rebut cap resposta del client");
+                }
+                else
+                {
+                    debugPrint("Ha hagut un error connectant amb el client");
+                    disconnectClient(client);
+                }
+                close(sock);
+            }
+            else
+                printf("L'element %s no forma part del client %s\n", elemId, clientId);
+        }
+        else
+            printf("El client %s no es troba connectat\n", clientId);
+    }
+    else
+        printf("El dispositiu introduit no forma part del sistema.\n");
+}
+
+int isInputElem(const char *elemId)
+{
+    int len = strlen(elemId);
+    return elemId[len - 1] == 'I';
 }
 
 /*--------------------------------------------------*/
@@ -125,7 +249,7 @@ void *handleTcpConnection(void *args)
                     {
                         if (hasElem(pdu.elem, client))
                         {
-                            int dataStored = storeData("SEND_DATA", client->id, pdu.elem, pdu.value, pdu.data);
+                            int dataStored = storeData("SEND_DATA", client->id, pdu.elem, pdu.value);
                             if (dataStored == 0)
                                 check(sendTcp(clientSocket, DATA_ACK, cfg.id, client->randNum, pdu.elem, pdu.value, client->id), "Error en l'enviament de DATA_ACK\n");
                             else
@@ -194,7 +318,7 @@ void controlAlives()
 /*--------------------------------------------------*/
 /*----------------- ATTEND CLIENTS -----------------*/
 /*--------------------------------------------------*/
-void attendClient(int socket)
+void attendClients(int socket)
 {
     reg_thread_args args;
     socklen_t len = sizeof(struct sockaddr_in);
@@ -247,18 +371,17 @@ void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, client_in
     }
     char randNum[9] = {'\0'}, data[61] = {'\0'}, debugMessage[60] = {'\0'};
     int newSocket, port;
-    struct sockaddr_in newAddress;
     /* GENEREM NOMBRE ALEATORI I OBRIM UN NOU PORT */
     sprintf(randNum, "%d", generateRandNum(10000000, 99999999));
     check((newSocket = socket(AF_INET, SOCK_DGRAM, 0)), "Error al connectar el socket udp.\n");
-    check(bindTo(newSocket, 0, &newAddress), "Error al bind del udpSocket");
+    check(bindTo(newSocket, 0), "Error al bind del udpSocket");
     check((port = getPort(newSocket)), "Error agafant port\n");
     sprintf(data, "%d", port);
     check(sendUdp(newSocket, REG_ACK, cfg.id, randNum, data, address), "Error enviant REG_ACK\n");
     sprintf(debugMessage, "Client %s pasa a l'estat WAIT_INFO", client->id);
     debugPrint(debugMessage);
     client->state = WAIT_INFO;
-    strcpy((client->randNum), randNum);
+    strcpy(client->randNum, randNum);
     waitInfo(newSocket, client);
     close(newSocket);
 }
@@ -293,8 +416,10 @@ void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, 
         sprintf(data, "%d", cfg.tcpPort);
         check(sendUdp(sock, INFO_ACK, cfg.id, client->randNum, data, clientAddress), "Error enviant INFO_NACK\n");
         /* Registrem les dades del client */
-        strcpy((client->elems), elems);
+        strcpy(client->elems, elems);
+        strcpy(client->ip, inet_ntoa(clientAddress.sin_addr));
         client->tcpPort = tcpPort;
+        printf("Tcp port assignat: %d\n", tcpPort);
         client->lastAlive = time(NULL);
         client->state = REGISTERED;
         sprintf(debugMessage, "Client %s pasa a l'estat REGISTERED", client->id);
@@ -349,14 +474,16 @@ void handler(int sig)
 }
 
 int storeData(const char *pack, const char *clientId,
-              const char *elem, const char *value, const char *date)
+              const char *elem, const char *value)
 {
     char filename[17] = {'\0'};
     sprintf(filename, "%s.data", clientId);
     FILE *fp = fopen(filename, "a");
     if (fp == NULL)
         return -1;
-    if (fprintf(fp, "%s;%s;%s;%s\n", date, pack, elem, value) == -1)
+    time_t t = time(NULL);
+    struct tm date = *localtime(&t);
+    if (fprintf(fp, "%d-%d-%d;%s;%s;%s;%s\n", date.tm_year + 1900, date.tm_mon + 1, date.tm_mday, __TIME__, pack, elem, value) == -1)
         return -1;
     fflush(fp);
     return 0;
@@ -385,5 +512,28 @@ int validCredentials(tcp_pdu pdu, client_info *client)
 
 int validElems(char *elems)
 {
-    return strlen(elems) > 0;
+    int numElems = 0;
+    char cpy[50] = {'\0'};
+    strcpy(cpy, elems);
+    char *elem = strtok(cpy, ";");
+    while (elem != NULL)
+    {
+        numElems++;
+        if (strlen(elem) != 7)
+            return 0;
+        if (!isdigit(elem[4]))
+            return 0;
+        if (elem[6] != 'I' && elem[6] != 'O')
+            return 0;
+        if (!isalpha(elem[0]) || !isupper(elem[0]) ||
+            !isalpha(elem[1]) || !isupper(elem[1]) ||
+            !isalpha(elem[2]) || !isupper(elem[2]))
+        {
+            return 0;
+        }
+        elem = strtok(NULL, ";");
+    }
+    if (numElems == 0)
+        return 0;
+    return 1;
 }
