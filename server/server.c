@@ -419,7 +419,6 @@ void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, 
         strcpy(client->elems, elems);
         strcpy(client->ip, inet_ntoa(clientAddress.sin_addr));
         client->tcpPort = tcpPort;
-        printf("Tcp port assignat: %d\n", tcpPort);
         client->lastAlive = time(NULL);
         client->state = REGISTERED;
         sprintf(debugMessage, "Client %s pasa a l'estat REGISTERED", client->id);
