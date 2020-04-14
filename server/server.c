@@ -142,10 +142,7 @@ void listClients()
     for (int i = 0; i < cdb.length; i++)
     {
         client_info client = cdb.clients[i];
-        const char *state = client.state == DISCONNECTED ? "DISCONNECTED" :
-                            client.state == WAIT_INFO ? "WAIT_INFO" : 
-                            client.state == SEND_ALIVE ? "SEND_ALIVE" : 
-                            "\0";
+        const char *state = client.state == DISCONNECTED ? "DISCONNECTED" : client.state == WAIT_INFO ? "WAIT_INFO" : client.state == SEND_ALIVE ? "SEND_ALIVE" : "\0";
         printf("%-12s %-8s %-15s %-12s %-50s\n", client.id, client.randNum, client.ip, state, client.elems);
     }
     printf("\n");
@@ -234,6 +231,7 @@ void tcpConnections(int tcpSocket)
 void *handleTcpConnection(void *args)
 {
     int clientSocket = *((int *)args);
+    char debugMessage[55] = {'\0'};
     fd_set inputs;
     check(selectIn(clientSocket, &inputs, TCP_WAIT_TIME), "Error en el select\n");
     if (FD_ISSET(clientSocket, &inputs))
@@ -246,6 +244,8 @@ void *handleTcpConnection(void *args)
             if ((clientIndex = isAuthorized(&cdb, pdu.id)) != -1)
             {
                 client_info *client = &(cdb.clients[clientIndex]);
+                sprintf(debugMessage, "El client %s ha enviat un paquet SEND_DATA", client->id);
+                debugPrint(debugMessage);
                 if (validCredentials(pdu, client))
                 {
                     if (client->state == SEND_ALIVE)
@@ -254,24 +254,38 @@ void *handleTcpConnection(void *args)
                         {
                             int dataStored = storeData("SEND_DATA", client->id, pdu.elem, pdu.value);
                             if (dataStored == 0)
+                            {
+                                debugPrint("Dades emmagatzemades");
                                 check(sendTcp(clientSocket, DATA_ACK, cfg.id, client->randNum, pdu.elem, pdu.value, client->id), "Error en l'enviament de DATA_ACK\n");
+                            }
                             else
+                            {
+                                debugPrint("No s'han pogut emmagatzemar les dades");
                                 check(sendTcp(clientSocket, DATA_NACK, cfg.id, client->randNum, pdu.elem, pdu.value, "No s'han pogut emmagatzemar les dades al servidor"), "Error enviant DATA_NACK\n");
+                            }
                         }
                         else
+                        {
+                            debugPrint("L'element especificat en el paquet no forma part del client");
                             check(sendTcp(clientSocket, DATA_NACK, cfg.id, client->randNum, pdu.elem, pdu.value, "L'element no es troba en el dispositiu"), "Error enviant DATA_NACK\n");
+                        }
                     }
                     else
+                    {
+                        debugPrint("El client no es troba en l'estat SEND_ALIVE");
                         disconnectClient(client);
+                    }
                 }
                 else
                 {
+                    debugPrint("Dades del client incorrectes");
                     check(sendTcp(clientSocket, DATA_REJ, cfg.id, pdu.randNum, pdu.elem, pdu.value, ""), "Error enviant DATA_REJ\n");
                     disconnectClient(client);
                 }
             }
             else
             {
+                debugPrint("Un client no autoritzat ha intentat enviar un paquet SEND_DATA");
                 check(sendTcp(clientSocket, DATA_REJ, cfg.id, pdu.randNum, pdu.elem, pdu.value, ""), "Error enviant DATA_REJ\n");
             }
         }
