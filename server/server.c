@@ -93,6 +93,7 @@ int main(int argc, char const *argv[])
 /*--------------------------------------------------*/
 
 void startCli()
+/* Simula l'execució de la consola de comandes */
 {
     while (1)
     {
@@ -141,7 +142,10 @@ void listClients()
     for (int i = 0; i < cdb.length; i++)
     {
         client_info client = cdb.clients[i];
-        const char *state = client.state == DISCONNECTED ? "DISCONNECTED" : client.state == WAIT_INFO ? "WAIT_INFO" : client.state == SEND_ALIVE ? "SEND_ALIVE" : "\0";
+        const char *state = client.state == DISCONNECTED ? "DISCONNECTED" :
+                            client.state == WAIT_INFO ? "WAIT_INFO" : 
+                            client.state == SEND_ALIVE ? "SEND_ALIVE" : 
+                            "\0";
         printf("%-12s %-8s %-15s %-12s %-50s\n", client.id, client.randNum, client.ip, state, client.elems);
     }
     printf("\n");
@@ -178,9 +182,7 @@ void runConnection(unsigned char pack, char *clientId, char *elemId, char *value
                             storeData(pack == SET_DATA ? "SET_DATA" : "GET_DATA", client->id, response.elem, response.value);
                         }
                         else if (response.pack == DATA_NACK)
-                        {
                             debugPrint("Dades no acceptades");
-                        }
                         else if (response.pack == DATA_REJ)
                         {
                             debugPrint("Dades rebutjades, client passa a l'estat DISCONNECTED");
@@ -198,13 +200,13 @@ void runConnection(unsigned char pack, char *clientId, char *elemId, char *value
                 close(sock);
             }
             else
-                printf("L'element %s no forma part del client %s\n", elemId, clientId);
+                printf("\tL'element %s no forma part del client %s\n", elemId, clientId);
         }
         else
-            printf("El client %s no es troba connectat\n", clientId);
+            printf("\tEl client %s no es troba connectat\n", clientId);
     }
     else
-        printf("El dispositiu introduit no forma part del sistema.\n");
+        printf("\tEl dispositiu introduit no forma part del sistema.\n");
 }
 
 int isInputElem(const char *elemId)
@@ -217,6 +219,7 @@ int isInputElem(const char *elemId)
 /*-------------- HANDLE TCP CONNECTIONS ------------*/
 /*--------------------------------------------------*/
 void tcpConnections(int tcpSocket)
+/* Executa el procés d'espera de connexions tcp */
 {
     check(listen(tcpSocket, SERVER_BACKLOG), "Error escoltant per el port tcp\n");
     while (1)
@@ -280,6 +283,7 @@ void *handleTcpConnection(void *args)
 /*-------------- CONTROL ALIVE CLIENTS -------------*/
 /*--------------------------------------------------*/
 void controlAlives()
+/* Comprova que cada client segueix operatiu */
 {
     while (1)
     {
@@ -319,6 +323,7 @@ void controlAlives()
 /*----------------- ATTEND CLIENTS -----------------*/
 /*--------------------------------------------------*/
 void attendClients(int socket)
+/* Espera a rebre paquets UDP dels clients */
 {
     reg_thread_args args;
     socklen_t len = sizeof(struct sockaddr_in);
@@ -387,6 +392,7 @@ void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, client_in
 }
 
 void waitInfo(int sock, client_info *client)
+/* Executem el procés de rebuda d'informació del client */
 {
     fd_set inputs;
     check(selectIn(sock, &inputs, INFO_WAIT_TIME), "Error en el select\n");

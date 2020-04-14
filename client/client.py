@@ -14,7 +14,9 @@ signal.signal(signal.SIGTSTP, signal.SIG_IGN)
 def register(sock, server_address):
     global client
     client.register_attemps += 1
+    logger.debug_print(f"Registrant el client al servidor. (Intent {client.register_attemps})")
     if client.register_attemps > o:
+        logger.debug_print("S'ha superat el nombre d'intents permesos")
         print("No s'ha pogut contactar amb el servidor")
         client.current_state = DISCONNECTED
     else:
@@ -359,7 +361,6 @@ try:
     udp_sock.bind(client.local_address())
     while not client.has_state(DISCONNECTED):
         if client.has_state(NOT_REGISTERED):
-            logger.debug_print("Registrant disposisitiu al servidor...")
             # Iniciem la fase de registre
             register(udp_sock, server_udp_address)
             if client.has_state(REGISTERED):
