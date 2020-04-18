@@ -171,7 +171,6 @@ def read_cfg(filename):
             if len(items) == 2:
                 key, value = items
                 config[key] = value
-
         t = config['Params'].strip().split(';')
         config['Params'] = dict((key, "") for key in t)
         config['Local-TCP'] = int(config['Local-TCP'])

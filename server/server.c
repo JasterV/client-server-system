@@ -228,6 +228,7 @@ void tcpConnections(int tcpSocket)
         check(pthread_detach(newThread), "Error detaching a thread");
     }
 }
+
 void *handleTcpConnection(void *args)
 {
     int clientSocket = *((int *)args);
