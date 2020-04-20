@@ -32,7 +32,6 @@ clients_db cdb; /* Base de dades */
 int main(int argc, char const *argv[])
 {
     signal(SIGINT, handler);
-    signal(SIGQUIT, SIG_IGN);
     signal(SIGTSTP, SIG_IGN);
     memset(&cfg, 0, sizeof(config));
     memset(&cdb, 0, sizeof(clients_db));

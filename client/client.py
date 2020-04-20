@@ -1,8 +1,7 @@
-#!/usr/bin/python3
-from utils import *
+#!/usr/bin/env python3
+from utils import * 
 
-signal.signal(signal.SIGQUIT, signal.SIG_IGN)
-signal.signal(signal.SIGINT, signal.SIG_IGN)
+signal.signal(signal.SIGINT, handler)
 signal.signal(signal.SIGTSTP, signal.SIG_IGN)
 
 # --------------------------------------------------------------
@@ -24,6 +23,7 @@ def register(sock, server_address):
 def send_reg_req(sock, server_address, num_sends, timeout):
     global client
     if num_sends >= n:
+        
         time.sleep(u)
         register(sock, server_address)
     elif not client.has_state(REGISTERED):

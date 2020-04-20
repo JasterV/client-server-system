@@ -70,6 +70,10 @@ class Logger:
             print("{0}:{1}:{2} => {3}".format(
                 now.hour, now.minute, now.second, message))
 
+def handler(signum, frame):
+    print('Procés acabat per ctrl+c')
+    sys.exit(0)
+
 # --------------------------------------------
 # -------------SOCKETS UTILITIES--------------
 # --------------------------------------------
