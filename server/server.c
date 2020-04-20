@@ -1,24 +1,30 @@
 #include "utils.h"
 
 void handler(int sig);
+/* ATTEND CLIENT FUNCTIONS */
 void attendClients(int socket);
 void *handlePdu(void *args);
+/* REGISTRATION FUNCTIONS */
 void registerClient(int sock, udp_pdu pdu, struct sockaddr_in address, client_info *client);
 void waitInfo(int sock, client_info *client);
 void handleClientInfo(int sock, udp_pdu info, struct sockaddr_in clientAddress, client_info *client);
-int validInfo(const char *id, const char *randNum, int tcpPort, char *elems, client_info *client);
-int validElems(char *elems);
+/* ALIVES FUNCTIONS */
 void handleAlive(int sock, udp_pdu pdu, struct sockaddr_in clientAddress, client_info *client);
-int validAlive(udp_pdu pdu, client_info *client);
 void controlAlives();
+/* TCP CONNECTIONS FUNCTIONS*/
 void tcpConnections(int tcpSocket);
 void *handleTcpConnection(void *args);
-int validCredentials(tcp_pdu pdu, client_info *client);
-int storeData(const char *pack, const char *clientId, const char *elem, const char *value);
+/* COMMAND LINE INTERFACE FUNCTIONS */
 void startCli();
 void listClients();
 void runConnection(unsigned char pack, char *clientId, char *elemId, char *newValue);
+/* AUXILIAR FUNCTIONS */
+int storeData(const char *pack, const char *clientId, const char *elem, const char *value);
 int isInputElem(const char *elemId);
+int validElems(char *elems);
+int validCredentials(tcp_pdu pdu, client_info *client);
+int validAlive(udp_pdu pdu, client_info *client);
+int validInfo(const char *id, const char *randNum, int tcpPort, char *elems, client_info *client);
 
 config cfg;     /* Configuració del servidor */
 clients_db cdb; /* Base de dades */
@@ -82,7 +88,7 @@ int main(int argc, char const *argv[])
         kill(-getpid(), SIGINT);
     }
     /* Si qualsevol procés fill acaba
-       envia una señal SIGINT a tots els 
+       envia una señal SIGINT a tots els
        processos */
     wait(NULL);
     kill(-getpid(), SIGINT);
